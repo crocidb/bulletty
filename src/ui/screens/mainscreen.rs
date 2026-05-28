@@ -12,6 +12,7 @@ use tracing::error;
 use crate::{
     app::AppWorkStatus,
     core::{
+        config::Config,
         feed::feedentry::FeedEntry,
         hooks::AppHooks,
         library::feedlibrary::FeedLibrary,
@@ -44,16 +45,18 @@ pub struct MainScreen {
     feedentrystate: FeedEntryState,
     inputstate: MainInputState,
     hooks: Rc<AppHooks>,
+    config: Rc<Config>,
 }
 
 impl MainScreen {
-    pub fn new(library: Rc<RefCell<FeedLibrary>>, hooks: Rc<AppHooks>) -> Self {
+    pub fn new(library: Rc<RefCell<FeedLibrary>>, hooks: Rc<AppHooks>, config: Rc<Config>) -> Self {
         Self {
             library,
             feedtreestate: FeedTreeState::new(),
             feedentrystate: FeedEntryState::new(),
             inputstate: MainInputState::Menu,
             hooks,
+            config,
         }
     }
 
@@ -165,7 +168,9 @@ impl MainScreen {
 
 impl AppScreen for MainScreen {
     fn start(&mut self) {
-        self.library.borrow_mut().start_updater();
+        if !matches!(self.config.tui_auto_update, Some(false)) {
+            self.library.borrow_mut().start_updater();
+        }
     }
 
     fn quit(&mut self) {}

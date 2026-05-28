@@ -7,11 +7,13 @@ use std::path::{Path, PathBuf};
 use crate::core::defs::CONFIG_FILE;
 use crate::core::hooks::AppHooks;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Config {
     pub datapath: PathBuf,
     #[serde(default)]
     pub hooks: Option<AppHooks>,
+    #[serde(default)]
+    pub tui_auto_update: Option<bool>,
 }
 
 pub struct ConfigStore {
