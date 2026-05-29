@@ -168,7 +168,7 @@ impl MainScreen {
 
 impl AppScreen for MainScreen {
     fn start(&mut self) {
-        if !matches!(self.config.tui_auto_update, Some(false)) {
+        if self.config.tui_auto_update {
             self.library.borrow_mut().start_updater();
         }
     }

@@ -13,7 +13,7 @@ pub struct Config {
     #[serde(default)]
     pub hooks: Option<AppHooks>,
     #[serde(default)]
-    pub tui_auto_update: Option<bool>,
+    pub tui_auto_update: bool,
 }
 
 pub struct ConfigStore {
