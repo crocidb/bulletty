@@ -1,6 +1,13 @@
-use std::{cell::RefCell, collections::VecDeque, rc::Rc, time::Duration};
+use std::{cell::RefCell, collections::VecDeque, io::stdout, rc::Rc, time::Duration};
 
 use color_eyre::{Result, eyre};
+use crossterm::{
+    cursor,
+    event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
+    execute,
+};
+#[cfg(unix)]
+use libc;
 use ratatui::{
     DefaultTerminal,
     layout::{Constraint, Flex, Layout, Margin, Rect},
@@ -232,6 +239,23 @@ impl App {
                     crossterm::event::poll(self.event_poll_timeout).unwrap_or(true);
                 if event_available {
                     let terminal_event = crossterm::event::read()?;
+
+                    #[cfg(unix)]
+                    if let Event::Key(KeyEvent {
+                        code: KeyCode::Char('z'),
+                        modifiers: KeyModifiers::CONTROL,
+                        kind: KeyEventKind::Press,
+                        ..
+                    }) = terminal_event
+                    {
+                        ratatui::restore();
+                        let _ = execute!(stdout(), cursor::Show);
+                        unsafe {
+                            libc::raise(libc::SIGTSTP);
+                        }
+                        terminal = ratatui::init();
+                        continue;
+                    }
 
                     let screen = if let Some(dialog) = self.dialog_queue.get_mut(0) {
                         dialog.as_screen_mut()

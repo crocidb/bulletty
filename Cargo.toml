@@ -44,6 +44,9 @@ url = "2.5.8"
 html-escape = "0.2.13"
 astral-tl = "0.7.11"
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [build-dependencies]
 serde = { version = "1.0", features = ["derive"] }
 toml = "1.1.2"

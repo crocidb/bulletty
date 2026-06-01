@@ -245,6 +245,7 @@ dependencies = [
  "html2md-bulletty",
  "indoc",
  "itertools",
+ "libc",
  "open",
  "openssl",
  "pretty_assertions",
