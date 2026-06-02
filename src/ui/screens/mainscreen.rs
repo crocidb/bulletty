@@ -104,7 +104,7 @@ impl MainScreen {
             )));
         }
 
-        match open::that(url) {
+        match open::that_detached(url) {
             Ok(_) => Ok(AppScreenEvent::Notify(AppNotification::new(
                 "Link opened externally",
                 NotificationPriority::Low,
