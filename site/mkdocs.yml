@@ -32,6 +32,7 @@ nav:
   - Install: 'install.md'
   - Docs:
     - CLI Reference: 'docs/cli_reference.md'
+    - Config: 'docs/config.md'
     - Themes: 'docs/themes.md'
     - Hooks: 'docs/hooks.md'
     - Contributing: 'contributing.md'
