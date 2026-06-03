@@ -86,6 +86,14 @@ Prints the path to the local config directory.
 bulletty dirs local-config
 ```
 
+#### `dirs themes`
+
+Prints the path to the themes directory.
+
+```
+bulletty dirs themes
+```
+
 ### 💠 `import <OPML_FILE>`
 
 Imports feed sources from an OPML file. Most feed readers can export to this format, making it easy to migrate your subscriptions into **bulletty**.

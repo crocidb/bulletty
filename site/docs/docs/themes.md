@@ -13,7 +13,7 @@ your own.
 ## 📝 Theme File Format
 
 Theme files are written in [TOML](https://toml.io/) format and stored in
-`res/themes/`. Each theme contains:
+the Library under `themes/`. Each theme contains:
 
 ```toml
 scheme = "Theme Name"
