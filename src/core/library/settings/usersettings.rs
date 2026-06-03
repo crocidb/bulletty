@@ -16,7 +16,7 @@ impl UserSettings {
         let embedded_themes = themedata::get_themes();
         let themes = embedded_themes
             .into_iter()
-            .chain(themes_from_library.into_iter())
+            .chain(themes_from_library)
             .collect::<HashMap<String, Theme>>();
 
         Ok(Self {
@@ -76,11 +76,9 @@ impl UserSettings {
             }
         }
 
-        let themes_map = themes
+        themes
             .iter()
             .map(|theme| (theme.scheme.clone(), theme.clone()))
-            .collect::<HashMap<String, Theme>>();
-
-        themes_map
+            .collect::<HashMap<String, Theme>>()
     }
 }
