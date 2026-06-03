@@ -1,6 +1,9 @@
 use std::{collections::HashMap, ffi::OsString, fs, path::Path};
 
-use crate::core::library::settings::{appearance::Appearance, theme::Theme, themedata};
+use crate::core::{
+    defs::DATA_THEMES_DIR,
+    library::settings::{appearance::Appearance, theme::Theme, themedata},
+};
 
 pub struct UserSettings {
     pub appearance: Appearance,
@@ -11,10 +14,10 @@ impl UserSettings {
     pub fn new(datapath: &Path) -> color_eyre::Result<Self> {
         let themes_from_library = UserSettings::get_theme_files(datapath);
         let embedded_themes = themedata::get_themes();
-        let themes: HashMap<String, Theme> = themes_from_library
+        let themes = embedded_themes
             .into_iter()
-            .chain(embedded_themes.into_iter())
-            .collect();
+            .chain(themes_from_library.into_iter())
+            .collect::<HashMap<String, Theme>>();
 
         Ok(Self {
             appearance: Appearance::new(datapath)?,
@@ -40,7 +43,7 @@ impl UserSettings {
 
     fn get_theme_files(datapath: &Path) -> HashMap<String, Theme> {
         let theme_file_ext = OsString::from("toml");
-        let themes_path = Path::join(datapath, Path::new("themes"));
+        let themes_path = Path::join(datapath, DATA_THEMES_DIR);
         let mut themes: Vec<Theme> = Vec::new();
 
         if let Ok(entries) = fs::read_dir(themes_path) {
