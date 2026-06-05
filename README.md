@@ -55,6 +55,12 @@ Or using the traditional command:
 nix-env -iA nixpkgs.bulletty
 ```
 
+### NetBSD
+
+```shell
+pkgin install bulletty
+```
+
 ### 📦 Snap
 
 [![bulletty](https://snapcraft.io/bulletty/badge.svg)](https://snapcraft.io/bulletty)
