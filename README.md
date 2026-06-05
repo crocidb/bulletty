@@ -55,6 +55,12 @@ Or using the traditional command:
 nix-env -iA nixpkgs.bulletty
 ```
 
+### NetBSD
+
+```shell
+pkgin install bulletty
+```
+
 ### 📦 Snap
 
 [![bulletty](https://snapcraft.io/bulletty/badge.svg)](https://snapcraft.io/bulletty)
@@ -168,6 +174,12 @@ One of the nice things about this open data structure is that people can build e
 git clone https://github.com/CrociDB/bulletty.git
 cd bulletty
 cargo build --release
+```
+
+Build with `nix` is also possible with:
+
+```shell
+nix run .#release
 ```
 
 ### Notes on building on Windows
