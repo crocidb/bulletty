@@ -55,7 +55,7 @@ Or using the traditional command:
 nix-env -iA nixpkgs.bulletty
 ```
 
-### NetBSD
+### 🚩 NetBSD
 
 ```shell
 pkgin install bulletty
