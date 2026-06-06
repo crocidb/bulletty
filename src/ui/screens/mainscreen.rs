@@ -164,6 +164,13 @@ impl MainScreen {
             .min(100);
         l.settings.appearance.save()
     }
+
+    fn force_update(&mut self) {
+        let mut feed_library = self.library.borrow_mut();
+        if feed_library.updater.is_none() {
+            feed_library.start_updater();
+        }
+    }
 }
 
 impl AppScreen for MainScreen {
@@ -312,10 +319,7 @@ impl AppScreen for MainScreen {
                     )))
                 }
                 (_, KeyCode::Char('U')) => {
-                    let mut feed_library = self.library.borrow_mut();
-                    if feed_library.updater.is_none() {
-                        feed_library.start_updater();
-                    }
+                    self.force_update();
                     Ok(AppScreenEvent::None)
                 }
                 (_, KeyCode::Char('>')) => {
@@ -444,10 +448,7 @@ impl AppScreen for MainScreen {
                     }
                 }
                 (_, KeyCode::Char('U')) => {
-                    let mut feed_library = self.library.borrow_mut();
-                    if feed_library.updater.is_none() {
-                        feed_library.start_updater();
-                    }
+                    self.force_update();
                     Ok(AppScreenEvent::None)
                 }
                 (_, KeyCode::Char('t')) => self.open_theme_selector(),
@@ -498,7 +499,7 @@ impl AppScreen for MainScreen {
                     InstructionDetail::new("Enter", "select category or read entry"),
                     InstructionDetail::new("r", "toggle item read state"),
                     InstructionDetail::new("R", "mark all items as read"),
-                    InstructionDetail::new("U", "Fetch all feed updates"),
+                    InstructionDetail::new("U", "fetch all feed updates"),
                 ],
             ),
             InstructionCategory::new(
