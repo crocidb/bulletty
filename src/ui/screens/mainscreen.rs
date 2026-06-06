@@ -311,6 +311,13 @@ impl AppScreen for MainScreen {
                         NotificationPriority::Low,
                     )))
                 }
+                (_, KeyCode::Char('U')) => {
+                    let mut feed_library = self.library.borrow_mut();
+                    if feed_library.updater.is_none() {
+                        feed_library.start_updater();
+                    }
+                    Ok(AppScreenEvent::None)
+                }
                 (_, KeyCode::Char('>')) => {
                     self.increase_tree_width()?;
                     Ok(AppScreenEvent::None)
@@ -436,6 +443,13 @@ impl AppScreen for MainScreen {
                         Ok(AppScreenEvent::None)
                     }
                 }
+                (_, KeyCode::Char('U')) => {
+                    let mut feed_library = self.library.borrow_mut();
+                    if feed_library.updater.is_none() {
+                        feed_library.start_updater();
+                    }
+                    Ok(AppScreenEvent::None)
+                }
                 (_, KeyCode::Char('t')) => self.open_theme_selector(),
                 (_, KeyCode::Char('?')) => Ok(AppScreenEvent::OpenDialog(Box::new(
                     HelpDialog::new(self.library.clone(), self.get_full_instructions()),
@@ -449,6 +463,7 @@ impl AppScreen for MainScreen {
         String::from("Main")
     }
 
+    // TODO: format this better
     fn get_instructions(&self) -> String {
         if self.inputstate == MainInputState::Menu {
             String::from(
@@ -483,6 +498,7 @@ impl AppScreen for MainScreen {
                     InstructionDetail::new("Enter", "select category or read entry"),
                     InstructionDetail::new("r", "toggle item read state"),
                     InstructionDetail::new("R", "mark all items as read"),
+                    InstructionDetail::new("U", "Fetch all feed updates"),
                 ],
             ),
             InstructionCategory::new(
