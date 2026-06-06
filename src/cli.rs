@@ -69,6 +69,8 @@ pub enum DirsCommands {
     Logs,
     /// Show the local config directory
     LocalConfig,
+    /// Show the themes directory
+    Themes,
 }
 
 pub fn run_main_cli(
@@ -240,11 +242,16 @@ fn command_dirs(
             Ok(())
         }
         Some(DirsCommands::Library { path }) => command_dirs_library(path, config, config_store),
+        Some(DirsCommands::Themes) => {
+            command_show_dir(dirs.themes());
+            Ok(())
+        }
         None => {
             println!("bulletty directories\n");
             println!("\t-> Library: {}", config.datapath.to_string_lossy());
             println!("\t-> Logs:    {}", dirs.log().to_string_lossy());
             println!("\t-> Local config:    {}", dirs.config().to_string_lossy());
+            println!("\t-> Themes:    {}", dirs.themes().to_string_lossy());
             println!();
 
             Ok(())

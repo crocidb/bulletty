@@ -3,12 +3,13 @@ use std::path::{Path, PathBuf};
 use color_eyre::eyre::Result;
 use etcetera::BaseStrategy;
 
-use crate::core::defs::{CONFIG_PATH, DATA_DIR, LOG_BASE_DIR, LOG_SUBDIR};
+use crate::core::defs::{CONFIG_PATH, DATA_DIR, DATA_THEMES_DIR, LOG_BASE_DIR, LOG_SUBDIR};
 
 pub struct Directories {
     log: PathBuf,
     default_data: PathBuf,
     config: PathBuf,
+    themes: PathBuf,
 }
 
 impl Directories {
@@ -23,6 +24,10 @@ impl Directories {
                 .join(LOG_SUBDIR),
             default_data: current_strategy.data_dir().join(DATA_DIR),
             config: current_strategy.config_dir().join(CONFIG_PATH),
+            themes: current_strategy
+                .data_dir()
+                .join(DATA_DIR)
+                .join(DATA_THEMES_DIR),
         })
     }
 
@@ -36,5 +41,9 @@ impl Directories {
 
     pub fn config(&self) -> &Path {
         &self.config
+    }
+
+    pub fn themes(&self) -> &Path {
+        &self.themes
     }
 }
