@@ -63,7 +63,7 @@ jobs:
         run: tar -czvf ${{ matrix.artifact_name }}.tar.gz -C target/${{ matrix.target }}/release bulletty 
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact_name }}
           path: ${{ matrix.artifact_name }}.*
