@@ -69,6 +69,7 @@ pub struct App {
     dialog_queue: VecDeque<Box<dyn Dialog>>,
     active_notification: Option<AppNotification>,
     event_poll_timeout: Duration,
+    config: Rc<Config>,
 }
 
 impl App {
@@ -76,6 +77,7 @@ impl App {
         Self {
             library: Rc::new(RefCell::new(FeedLibrary::new(&config.datapath))),
             hooks: Rc::new(config.hooks.clone().unwrap_or_default()),
+            config: Rc::new(config.to_owned()),
 
             running: true,
             current_state: None,
@@ -95,6 +97,7 @@ impl App {
         self.init(Box::new(MainScreen::new(
             self.library.clone(),
             self.hooks.clone(),
+            self.config.clone(),
         )));
 
         if self.library.borrow().is_empty() {
