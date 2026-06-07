@@ -261,14 +261,14 @@ impl App {
                     }
 
                     if let Event::Mouse(event) = terminal_event {
-                        let blah = match event.kind {
+                        let key_code = match event.kind {
                             crossterm::event::MouseEventKind::ScrollUp => Some(KeyCode::Up),
                             crossterm::event::MouseEventKind::ScrollDown => Some(KeyCode::Down),
                             _ => None,
                         };
 
-                        if let Some(blah) = blah {
-                            terminal_event = Event::Key(KeyEvent::new(blah, KeyModifiers::NONE))
+                        if let Some(key_code) = key_code {
+                            terminal_event = Event::Key(KeyEvent::new(key_code, KeyModifiers::NONE))
                         }
                     }
 

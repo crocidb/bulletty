@@ -1,9 +1,9 @@
-use std::io::stdout;
-use tracing::info;
 use crossterm::{
     event::{DisableMouseCapture, EnableMouseCapture},
     execute,
 };
+use std::io::stdout;
+use tracing::info;
 
 use crate::{app, core::config::Config};
 
