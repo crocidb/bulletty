@@ -15,7 +15,7 @@ use ratatui::text::{Line, Span, Text};
 use syntect::{
     easy::HighlightLines,
     highlighting::ThemeSet,
-    parsing::SyntaxSet,
+    parsing::{SyntaxDefinition, SyntaxSet, SyntaxSetBuilder},
     util::{LinesWithEndings, as_24_bit_terminal_escaped},
 };
 use tracing::{debug, instrument, warn};
@@ -104,6 +104,9 @@ struct TextWriter<'a, I> {
     /// Used to highlight code blocks, set when  a codeblock is encountered
     code_highlighter: Option<HighlightLines<'a>>,
 
+    /// The [`SyntaxSet`] that the current code_highlighter's syntax came from.
+    code_syntax_set: Option<&'static SyntaxSet>,
+
     /// Current list index as a stack of indices.
     list_indices: Vec<Option<u64>>,
 
@@ -127,6 +130,25 @@ struct TextWriter<'a, I> {
 }
 
 static SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(SyntaxSet::load_defaults_newlines);
+static EXTRA_SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(|| {
+    let mut builder = SyntaxSetBuilder::new();
+    builder.add_plain_text_syntax();
+    const FILES: &[&str] = &[
+        include_str!("../../../res/syntaxes/TOML.sublime-syntax"),
+        include_str!("../../../res/syntaxes/Dockerfile.sublime-syntax"),
+        include_str!("../../../res/syntaxes/CMake.sublime-syntax"),
+        include_str!("../../../res/syntaxes/INI.sublime-syntax"),
+        include_str!("../../../res/syntaxes/DotENV.sublime-syntax"),
+        include_str!("../../../res/syntaxes/GraphQL.sublime-syntax"),
+        include_str!("../../../res/syntaxes/nginx.sublime-syntax"),
+    ];
+    for src in FILES {
+        if let Ok(def) = SyntaxDefinition::load_from_str(src, true, None) {
+            builder.add(def);
+        }
+    }
+    builder.build()
+});
 static THEME_SET: LazyLock<ThemeSet> = LazyLock::new(ThemeSet::load_defaults);
 
 impl<'a, I> TextWriter<'a, I>
@@ -143,6 +165,7 @@ where
             list_indices: vec![],
             needs_newline: false,
             code_highlighter: None,
+            code_syntax_set: None,
             link: None,
             image: None,
             heading_meta: None,
@@ -307,8 +330,9 @@ where
 
     fn text(&mut self, text: CowStr<'a>) {
         if let Some(highlighter) = &mut self.code_highlighter {
+            let set = self.code_syntax_set.unwrap();
             let text: Text = LinesWithEndings::from(&text)
-                .filter_map(|line| highlighter.highlight_line(line, &SYNTAX_SET).ok())
+                .filter_map(|line| highlighter.highlight_line(line, set).ok())
                 .filter_map(|part| as_24_bit_terminal_escaped(&part, false).into_text().ok())
                 .flatten()
                 .collect();
@@ -474,19 +498,45 @@ where
 
     #[instrument(level = "trace", skip(self))]
     fn set_code_highlighter(&mut self, lang: &str) {
-        if let Some(syntax) = SYNTAX_SET.find_syntax_by_token(lang) {
-            debug!("Starting code block with syntax: {:?}", lang);
-            let theme = &THEME_SET.themes["base16-ocean.dark"];
-            let highlighter = HighlightLines::new(syntax, theme);
-            self.code_highlighter = Some(highlighter);
-        } else {
-            warn!("Could not find syntax for code block: {:?}", lang);
+        let resolved = match lang {
+            "shell" => "sh",
+            "bash" => "sh",
+            "yaml" => "yml",
+            "docker" => "Dockerfile",
+            "dockerfile" => "Dockerfile",
+            "Containerfile" => "Dockerfile",
+            "Caddyfile" => "nginx",
+            other => other,
+        };
+        let maybe_pair = SYNTAX_SET
+            .find_syntax_by_token(resolved)
+            .map(|s| (s, &*SYNTAX_SET))
+            .or_else(|| {
+                EXTRA_SYNTAX_SET
+                    .find_syntax_by_token(resolved)
+                    .map(|s| (s, &*EXTRA_SYNTAX_SET))
+            });
+        match maybe_pair {
+            Some((syntax, set)) => {
+                debug!(
+                    "Starting code block with syntax: {:?} (resolved: {:?})",
+                    lang, resolved
+                );
+                let theme = &THEME_SET.themes["base16-ocean.dark"];
+                let highlighter = HighlightLines::new(syntax, theme);
+                self.code_highlighter = Some(highlighter);
+                self.code_syntax_set = Some(set);
+            }
+            None => {
+                warn!("Could not find syntax for code block: {:?}", lang);
+            }
         }
     }
 
     #[instrument(level = "trace", skip(self))]
     fn clear_code_highlighter(&mut self) {
         self.code_highlighter = None;
+        self.code_syntax_set = None;
     }
 
     #[instrument(level = "trace", skip(self))]
