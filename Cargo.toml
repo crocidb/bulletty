@@ -23,7 +23,7 @@ clap = { version = "4.5.60", features = [ "derive" ] }
 roxmltree = "0.21.1"
 openssl = { version = "0.10", features = [ "vendored" ] }
 slug = "0.1"
-html2md-bulletty = { version = "0.2.15" }
+html2md-bulletty = { version = "0.2.16" }
 regex = "1.12.3"
 chrono = { version = "0.4", features = [ "serde" ] }
 tracing = "0.1"

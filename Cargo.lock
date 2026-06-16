@@ -1031,9 +1031,9 @@ dependencies = [
 
 [[package]]
 name = "html2md-bulletty"
-version = "0.2.15"
+version = "0.2.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "21f4ad474dee27d504da81545cc33b76bc37718fd1dc0741f8da853ad165f875"
+checksum = "e2ad9cc3ed91345a263153ad47fccad0eb8c4d9c63f5703886f7474848009df9"
 dependencies = [
  "html5ever",
  "jni",
