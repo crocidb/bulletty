@@ -278,10 +278,13 @@ where
     }
 
     fn end_heading(&mut self) {
-        if let Some(meta) = self.heading_meta.take()
-            && let Some(suffix) = meta.to_suffix()
-        {
-            self.push_span(Span::styled(suffix, Style::new().dim()));
+        if let Some(meta) = self.heading_meta.take() {
+            if let Some(suffix) = meta.to_suffix() {
+                self.push_span(Span::styled(
+                    suffix,
+                    styles::heading_meta(self.theme.as_ref()),
+                ));
+            }
         }
         self.needs_newline = true
     }
@@ -688,6 +691,24 @@ mod tests {
                 Line::default(),
                 Line::from_iter(["###### ", "Heading 6"]).style(styles::h6(None)),
             ])
+        );
+    }
+
+    #[rstest]
+    fn heading_attributes(_with_tracing: DefaultGuard) {
+        let h1 = styles::h1(None);
+        let meta = styles::heading_meta(None);
+
+        assert_eq!(
+            from_str("# Heading {#title .primary data-kind=doc}", None),
+            Text::from(
+                Line::from_iter([
+                    Span::from("# "),
+                    Span::from("Heading"),
+                    Span::styled(" {#title .primary data-kind=doc}", meta),
+                ])
+                .style(h1)
+            )
         );
     }
 
