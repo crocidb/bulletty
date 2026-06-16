@@ -57,18 +57,28 @@ pub fn get_feed(url: &str) -> color_eyre::Result<FeedItem> {
     Ok(feeditem)
 }
 
+fn extract_title(node: &Node) -> String {
+    node.descendants()
+        .find(|t| t.tag_name().name() == "title")
+        .and_then(|t| {
+            let text = t.text()?;
+            if t.attribute("type") == Some("html") {
+                Some(parse_html(text))
+            } else {
+                Some(text.to_string())
+            }
+        })
+        .map(|s| feedutils::normalize_and_truncate(s, 256))
+        .unwrap_or_default()
+}
+
 fn parse(doc: &str, feed_url: &str) -> color_eyre::Result<FeedItem> {
     let mut feed = FeedItem::default();
 
     let doc = roxmltree::Document::parse(doc)?;
     let feed_tag = doc.root();
 
-    feed.title = feed_tag
-        .descendants()
-        .find(|t| t.tag_name().name() == "title")
-        .and_then(|t| t.text())
-        .map(|s| feedutils::normalize_and_truncate(s, 256))
-        .unwrap_or_default();
+    feed.title = extract_title(&feed_tag);
 
     feed.description = feed_tag
         .descendants()
@@ -222,12 +232,7 @@ pub fn get_feed_entries_doc(
 
         // feed creation
         let fe = FeedEntry {
-            title: entry
-                .descendants()
-                .find(|t| t.tag_name().name() == "title")
-                .and_then(|t| t.text())
-                .map(|s| feedutils::normalize_and_truncate(s, 256))
-                .unwrap_or_default(),
+            title: extract_title(&entry),
             author: entryauthor,
             url: entryurl.clone(),
             text: content,
@@ -789,6 +794,69 @@ mod tests {
         assert_eq!(entry.url, "https://www.youtube.com/watch?v=VIDEOID");
         assert_eq!(entry.author, "Some Youtube Author");
         assert_eq!(entry.description, "This is a description!");
+    }
+
+    #[test]
+    fn get_feed_entries_doc_handles_html_entities_in_titles() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>HTML Entity Test</title>
+    <link>https://example.com/</link>
+    <description>Testing HTML entity decoding in entry titles</description>
+    <item>
+      <title>&#8220;curly&#8221; &amp; &lt;tag&gt;</title>
+      <link>https://example.com/plain</link>
+    </item>
+    <item>
+      <title type="html"><![CDATA[ &#8220;curly&#8221; &amp; &lt;tag&gt; ]]></title>
+      <link>https://example.com/cdata-html</link>
+    </item>
+    <item>
+      <title><![CDATA[ &#8220;curly&#8221; &amp; &lt;tag&gt; ]]></title>
+      <link>https://example.com/cdata-plain</link>
+    </item>
+  </channel>
+</rss>"#;
+
+        let entries = get_feed_entries_doc(xml, "Author")
+            .expect("failed to parse RSS entries with HTML entities");
+        assert_eq!(entries.len(), 3);
+
+        // Plain title: numeric and predefined entities are decoded.
+        assert_eq!(entries[0].title, "“curly” & <tag>");
+
+        // CDATA with type="html": entities inside CDATA are decoded and the
+        // content is converted from HTML to Markdown, so stray `<tag>` is escaped.
+        assert_eq!(entries[1].title, "“curly” & \\<tag\\>");
+
+        // CDATA without type="html": content stays literal.
+        assert_eq!(entries[2].title, "&#8220;curly&#8221; &amp; &lt;tag&gt;");
+    }
+
+    #[test]
+    fn get_feed_entries_doc_converts_html_tags_to_markdown_in_cdata_html_titles() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>HTML to Markdown Test</title>
+    <link>https://example.com/</link>
+    <description>Testing HTML tag conversion in CDATA html titles</description>
+    <item>
+      <title type="html"><![CDATA[ <b>bold</b> and <a href="https://example.com">a link</a> ]]></title>
+      <link>https://example.com/1</link>
+    </item>
+  </channel>
+</rss>"#;
+
+        let entries =
+            get_feed_entries_doc(xml, "Author").expect("failed to parse RSS entry with HTML title");
+        assert_eq!(entries.len(), 1);
+
+        assert_eq!(
+            entries[0].title,
+            "**bold** and [a link](https://example.com)"
+        );
     }
 
     #[test]
