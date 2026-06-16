@@ -241,7 +241,7 @@ impl App {
                 let event_available =
                     crossterm::event::poll(self.event_poll_timeout).unwrap_or(true);
                 if event_available {
-                    let terminal_event = crossterm::event::read()?;
+                    let mut terminal_event = crossterm::event::read()?;
 
                     #[cfg(unix)]
                     if let Event::Key(KeyEvent {
@@ -258,6 +258,18 @@ impl App {
                         }
                         terminal = ratatui::init();
                         continue;
+                    }
+
+                    if let Event::Mouse(event) = terminal_event {
+                        let key_code = match event.kind {
+                            crossterm::event::MouseEventKind::ScrollUp => Some(KeyCode::Up),
+                            crossterm::event::MouseEventKind::ScrollDown => Some(KeyCode::Down),
+                            _ => None,
+                        };
+
+                        if let Some(key_code) = key_code {
+                            terminal_event = Event::Key(KeyEvent::new(key_code, KeyModifiers::NONE))
+                        }
                     }
 
                     let screen = if let Some(dialog) = self.dialog_queue.get_mut(0) {
