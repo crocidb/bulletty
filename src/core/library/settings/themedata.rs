@@ -59,6 +59,60 @@ pub fn get_themes() -> HashMap<String, Theme> {
         },
     );
     m.insert(
+        "Catppuccin Latte".to_string(),
+        Theme {
+            scheme: "Catppuccin Latte".to_string(),
+            author: "Catppuccin Org (https://github.com/catppuccin/catppuccin)".to_string(),
+            base00: "eff1f5".to_string(),
+            base01: "e6e9ef".to_string(),
+            base02: "ccd0da".to_string(),
+            base03: "bcc0cc".to_string(),
+            base04: "8c8fa1".to_string(),
+            base05: "4c4f69".to_string(),
+            base06: "dc8a78".to_string(),
+            base07: "7287fd".to_string(),
+            base08: "d20f39".to_string(),
+            base09: "fe640b".to_string(),
+            base0A: "df8e1d".to_string(),
+            base0B: "40a02b".to_string(),
+            base0C: "179299".to_string(),
+            base0D: "1e66f5".to_string(),
+            base0E: "8839ef".to_string(),
+            base0F: "dd7878".to_string(),
+            base: [
+                15725045, 15133167, 13422810, 12370124, 9211809, 5001065, 14453368, 7505917,
+                13766457, 16671755, 14650909, 4235307, 1544857, 1992437, 8927727, 14514296,
+            ],
+        },
+    );
+    m.insert(
+        "Catppuccin Mocha".to_string(),
+        Theme {
+            scheme: "Catppuccin Mocha".to_string(),
+            author: "Catppuccin Org (https://github.com/catppuccin/catppuccin)".to_string(),
+            base00: "1e1e2e".to_string(),
+            base01: "181825".to_string(),
+            base02: "313244".to_string(),
+            base03: "45475a".to_string(),
+            base04: "7f849c".to_string(),
+            base05: "cdd6f4".to_string(),
+            base06: "f5e0dc".to_string(),
+            base07: "b4befe".to_string(),
+            base08: "f38ba8".to_string(),
+            base09: "fab387".to_string(),
+            base0A: "f9e2af".to_string(),
+            base0B: "a6e3a1".to_string(),
+            base0C: "94e2d5".to_string(),
+            base0D: "89b4fa".to_string(),
+            base0E: "cba6f7".to_string(),
+            base0F: "f2cdcd".to_string(),
+            base: [
+                1973806, 1579045, 3224132, 4540250, 8357020, 13489908, 16113884, 11845374,
+                15961000, 16429959, 16376495, 10937249, 9757397, 9024762, 13346551, 15912397,
+            ],
+        },
+    );
+    m.insert(
         "Decaf".to_string(),
         Theme {
             scheme: "Decaf".to_string(),
