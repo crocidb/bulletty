@@ -915,7 +915,7 @@ mod tests {
         let meta = styles::heading_meta(None);
 
         assert_eq!(
-            from_str("# Heading {#title .primary data-kind=doc}", None, 80),
+            from_str("# Heading {#title .primary data-kind=doc}", None),
             Text::from(
                 Line::from_iter([
                     Span::from("# "),
