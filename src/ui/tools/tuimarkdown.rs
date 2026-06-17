@@ -318,13 +318,13 @@ where
     }
 
     fn end_heading(&mut self) {
-        if let Some(meta) = self.heading_meta.take() {
-            if let Some(suffix) = meta.to_suffix() {
-                self.push_span(Span::styled(
-                    suffix,
-                    styles::heading_meta(self.theme.as_ref()),
-                ));
-            }
+        if let Some(meta) = self.heading_meta.take()
+            && let Some(suffix) = meta.to_suffix()
+        {
+            self.push_span(Span::styled(
+                suffix,
+                styles::heading_meta(self.theme.as_ref()),
+            ));
         }
         self.needs_newline = true
     }
@@ -752,7 +752,7 @@ fn wrap_code_line<'a>(
             let remaining = inner_width.saturating_sub(current_width);
 
             if span_width <= remaining {
-                current_spans.push(Span::styled(span.content.to_string(), style.clone()));
+                current_spans.push(Span::styled(span.content.to_string(), style));
                 current_width += span_width;
                 span_idx += 1;
             } else if remaining == 0 {
@@ -761,7 +761,7 @@ fn wrap_code_line<'a>(
                 let content = span.content.as_ref();
                 let (first, second) = split_str_at_width(content, remaining);
                 if !first.is_empty() {
-                    current_spans.push(Span::styled(first.to_string(), style.clone()));
+                    current_spans.push(Span::styled(first.to_string(), style));
                 }
                 spans[span_idx] = Span::styled(second.to_string(), style);
                 break;
