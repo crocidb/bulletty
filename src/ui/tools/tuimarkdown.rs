@@ -348,7 +348,8 @@ where
     fn text(&mut self, text: CowStr<'a>) {
         if let Some(highlighter) = &mut self.code_highlighter {
             let set = self.code_syntax_set.unwrap();
-            let text: Text = LinesWithEndings::from(&text)
+            let expanded = text.replace('\t', "  ");
+            let text: Text = LinesWithEndings::from(&expanded)
                 .filter_map(|line| highlighter.highlight_line(line, set).ok())
                 .filter_map(|part| as_24_bit_terminal_escaped(&part, false).into_text().ok())
                 .flatten()
@@ -365,7 +366,7 @@ where
             let code_style = styles::code(self.theme.as_ref());
             for line in text.lines() {
                 self.code_block_lines
-                    .push(Line::styled(line.to_string(), code_style));
+                    .push(Line::styled(line.replace('\t', "  "), code_style));
             }
             self.needs_newline = false;
             return;
