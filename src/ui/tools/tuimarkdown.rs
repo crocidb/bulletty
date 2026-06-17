@@ -12,7 +12,6 @@ use pulldown_cmark::{
 };
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span, Text};
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 use syntect::{
     easy::HighlightLines,
     highlighting::ThemeSet,
@@ -20,6 +19,7 @@ use syntect::{
     util::{LinesWithEndings, as_24_bit_terminal_escaped},
 };
 use tracing::{debug, instrument, warn};
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::core::library::settings::theme::Theme;
 use crate::ui::tools::styles;
@@ -547,12 +547,7 @@ where
                 let dashes = inner_width - lang_space;
                 let left = dashes / 2;
                 let right = dashes - left;
-                let top = format!(
-                    "┌{} {} {}┐",
-                    "─".repeat(left),
-                    lang,
-                    "─".repeat(right + 2)
-                );
+                let top = format!("┌{} {} {}┐", "─".repeat(left), lang, "─".repeat(right + 2));
                 self.push_line(Line::styled(top, code_style));
             } else {
                 let top = format!("┌{}┐", "─".repeat(box_width.saturating_sub(2)));
@@ -829,7 +824,8 @@ mod tests {
                 Hello
                 World
             "},
-                None, 80
+                None,
+                80
             ),
             Text::from_iter([
                 Line::from("Hello").style(styles::p(None)),
@@ -847,7 +843,8 @@ mod tests {
 
                 Paragraph 2
             "},
-                None, 80
+                None,
+                80
             ),
             Text::from_iter([
                 Line::from("Paragraph 1").style(styles::p(None)),
@@ -868,7 +865,8 @@ mod tests {
 
                 Paragraph 2
             "},
-                None, 80
+                None,
+                80
             ),
             Text::from_iter([
                 Line::from("Paragraph 1").style(styles::p(None)),
@@ -892,7 +890,8 @@ mod tests {
                 ##### Heading 5
                 ###### Heading 6
             "},
-                None, 80
+                None,
+                80
             ),
             Text::from_iter([
                 Line::from_iter(["# ", "Heading 1"]).style(styles::h1(None)),
@@ -939,7 +938,8 @@ mod tests {
 
                 > Blockquote
             "},
-                None, 80
+                None,
+                80
             ),
             Text::from_iter([
                 Line::from("Hello, world!").style(styles::blockquote(None)),
@@ -964,7 +964,8 @@ mod tests {
                 > Blockquote 1
                 > Blockquote 2
             "},
-                None, 80
+                None,
+                80
             ),
             Text::from_iter([
                 Line::from_iter([">", " ", "Blockquote 1"]).style(styles::blockquote(None)),
@@ -982,7 +983,8 @@ mod tests {
                 >
                 > Blockquote 2
             "},
-                None, 80
+                None,
+                80
             ),
             Text::from_iter([
                 Line::from_iter([">", " ", "Blockquote 1"]).style(styles::blockquote(None)),
@@ -1001,7 +1003,8 @@ mod tests {
 
                 > Blockquote 2
             "},
-                None, 80
+                None,
+                80
             ),
             Text::from_iter([
                 Line::from_iter([">", " ", "Blockquote 1"]).style(styles::blockquote(None)),
@@ -1019,7 +1022,8 @@ mod tests {
                 > Blockquote 1
                 >> Nested Blockquote
             "},
-                None, 80
+                None,
+                80
             ),
             Text::from_iter([
                 Line::from_iter([">", " ", "Blockquote 1"]).style(styles::blockquote(None)),
@@ -1037,7 +1041,8 @@ mod tests {
                 indoc! {"
                 - List item 1
             "},
-                None, 80
+                None,
+                80
             ),
             Text::from(Line::from_iter([
                 Span::from("\u{a0}\u{a0}• ").style(styles::list_item(None)),
@@ -1054,7 +1059,8 @@ mod tests {
                 - List item 1
                 - List item 2
             "},
-                None, 80
+                None,
+                80
             ),
             Text::from_iter([
                 Line::from_iter([
@@ -1077,7 +1083,8 @@ mod tests {
                 1. List item 1
                 2. List item 2
             "},
-                None, 80
+                None,
+                80
             ),
             Text::from_iter([
                 Line::from_iter([
@@ -1100,7 +1107,8 @@ mod tests {
                 - List item 1
                   - Nested list item 1
             "},
-                None, 80
+                None,
+                80
             ),
             Text::from_iter([
                 Line::from_iter([
@@ -1122,7 +1130,8 @@ mod tests {
                 - [ ] Incomplete
                 - [x] Complete
             "},
-            None, 80,
+            None,
+            80,
         );
         // Just verify it parses without error and has the right number of lines
         assert_eq!(result.lines.len(), 2);
@@ -1204,7 +1213,8 @@ mod tests {
 
                 Body
             "},
-                None, 80
+                None,
+                80
             ),
             Text::from_iter([
                 Line::from("---").style(Style::new().fg(Color::Rgb(255, 255, 255))),
