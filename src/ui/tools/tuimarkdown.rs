@@ -10,20 +10,21 @@ use itertools::{Itertools, Position};
 use pulldown_cmark::{
     BlockQuoteKind, CodeBlockKind, CowStr, Event, HeadingLevel, Options, Parser, Tag, TagEnd,
 };
-use ratatui::style::Style;
+use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span, Text};
 use syntect::{
     easy::HighlightLines,
     highlighting::ThemeSet,
-    parsing::SyntaxSet,
+    parsing::{SyntaxDefinition, SyntaxSet, SyntaxSetBuilder},
     util::{LinesWithEndings, as_24_bit_terminal_escaped},
 };
 use tracing::{debug, instrument, warn};
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::core::library::settings::theme::Theme;
 use crate::ui::tools::styles;
 
-pub fn from_str(input: &str, theme: Option<Theme>) -> Text<'_> {
+pub fn from_str(input: &str, theme: Option<Theme>, max_width: u16) -> Text<'_> {
     let mut options = Options::empty();
     options.insert(Options::ENABLE_STRIKETHROUGH);
     options.insert(Options::ENABLE_TASKLISTS);
@@ -32,7 +33,7 @@ pub fn from_str(input: &str, theme: Option<Theme>) -> Text<'_> {
     options.insert(Options::ENABLE_SUPERSCRIPT);
     options.insert(Options::ENABLE_SUBSCRIPT);
     let parser = Parser::new_ext(input, options);
-    let mut writer = TextWriter::new(parser, theme);
+    let mut writer = TextWriter::new(parser, theme, max_width);
     writer.run();
     writer.text
 }
@@ -104,6 +105,9 @@ struct TextWriter<'a, I> {
     /// Used to highlight code blocks, set when  a codeblock is encountered
     code_highlighter: Option<HighlightLines<'a>>,
 
+    /// The [`SyntaxSet`] that the current code_highlighter's syntax came from.
+    code_syntax_set: Option<&'static SyntaxSet>,
+
     /// Current list index as a stack of indices.
     list_indices: Vec<Option<u64>>,
 
@@ -122,18 +126,49 @@ struct TextWriter<'a, I> {
     /// True when last element requires a new line
     needs_newline: bool,
 
+    /// Buffer for highlighted code block lines before flushing.
+    code_block_lines: Vec<Line<'a>>,
+
+    /// The language identifier of the current code block.
+    code_block_lang: String,
+
+    /// Whether we are currently inside a code block (even without a highlighter).
+    in_codeblock: bool,
+
+    /// Maximum width of the rendered area (viewport width).
+    max_width: u16,
+
     /// bulletty Theme
     theme: Option<Theme>,
 }
 
 static SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(SyntaxSet::load_defaults_newlines);
+static EXTRA_SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(|| {
+    let mut builder = SyntaxSetBuilder::new();
+    builder.add_plain_text_syntax();
+    const FILES: &[&str] = &[
+        include_str!("../../../res/syntaxes/TOML.sublime-syntax"),
+        include_str!("../../../res/syntaxes/Dockerfile.sublime-syntax"),
+        include_str!("../../../res/syntaxes/CMake.sublime-syntax"),
+        include_str!("../../../res/syntaxes/INI.sublime-syntax"),
+        include_str!("../../../res/syntaxes/DotENV.sublime-syntax"),
+        include_str!("../../../res/syntaxes/GraphQL.sublime-syntax"),
+        include_str!("../../../res/syntaxes/nginx.sublime-syntax"),
+    ];
+    for src in FILES {
+        if let Ok(def) = SyntaxDefinition::load_from_str(src, true, None) {
+            builder.add(def);
+        }
+    }
+    builder.build()
+});
 static THEME_SET: LazyLock<ThemeSet> = LazyLock::new(ThemeSet::load_defaults);
 
 impl<'a, I> TextWriter<'a, I>
 where
     I: Iterator<Item = Event<'a>>,
 {
-    fn new(iter: I, theme: Option<Theme>) -> Self {
+    fn new(iter: I, theme: Option<Theme>, max_width: u16) -> Self {
         Self {
             iter,
             text: Text::default(),
@@ -143,10 +178,15 @@ where
             list_indices: vec![],
             needs_newline: false,
             code_highlighter: None,
+            code_syntax_set: None,
             link: None,
             image: None,
             heading_meta: None,
             in_metadata_block: false,
+            code_block_lines: vec![],
+            code_block_lang: String::new(),
+            in_codeblock: false,
+            max_width,
             theme,
         }
     }
@@ -278,10 +318,13 @@ where
     }
 
     fn end_heading(&mut self) {
-        if let Some(meta) = self.heading_meta.take()
-            && let Some(suffix) = meta.to_suffix()
-        {
-            self.push_span(Span::styled(suffix, Style::new().dim()));
+        if let Some(meta) = self.heading_meta.take() {
+            if let Some(suffix) = meta.to_suffix() {
+                self.push_span(Span::styled(
+                    suffix,
+                    styles::heading_meta(self.theme.as_ref()),
+                ));
+            }
         }
         self.needs_newline = true
     }
@@ -304,14 +347,26 @@ where
 
     fn text(&mut self, text: CowStr<'a>) {
         if let Some(highlighter) = &mut self.code_highlighter {
-            let text: Text = LinesWithEndings::from(&text)
-                .filter_map(|line| highlighter.highlight_line(line, &SYNTAX_SET).ok())
+            let set = self.code_syntax_set.unwrap();
+            let expanded = text.replace('\t', "  ");
+            let text: Text = LinesWithEndings::from(&expanded)
+                .filter_map(|line| highlighter.highlight_line(line, set).ok())
                 .filter_map(|part| as_24_bit_terminal_escaped(&part, false).into_text().ok())
                 .flatten()
                 .collect();
 
             for line in text.lines {
-                self.text.push_line(line);
+                self.code_block_lines.push(line);
+            }
+            self.needs_newline = false;
+            return;
+        }
+
+        if self.in_codeblock {
+            let code_style = styles::code(self.theme.as_ref());
+            for line in text.lines() {
+                self.code_block_lines
+                    .push(Line::styled(line.replace('\t', "  "), code_style));
             }
             self.needs_newline = false;
             return;
@@ -454,36 +509,109 @@ where
 
         self.set_code_highlighter(lang);
 
-        let span = Span::from(format!("```{lang}"));
-        self.push_line(span.into());
-        self.needs_newline = true;
+        self.code_block_lines.clear();
+        self.code_block_lang.clear();
+        self.code_block_lang.push_str(lang);
+        self.in_codeblock = true;
     }
 
     fn end_codeblock(&mut self) {
-        let span = Span::from("```");
-        self.push_line(span.into());
-        self.needs_newline = true;
+        self.in_codeblock = false;
+        self.flush_codeblock();
 
         self.line_styles.pop();
 
         self.clear_code_highlighter();
     }
 
+    fn flush_codeblock(&mut self) {
+        let code_style = styles::code(self.theme.as_ref());
+        let bg = code_style.bg.unwrap_or(Color::Black);
+
+        let lines = std::mem::take(&mut self.code_block_lines);
+        let lang = std::mem::take(&mut self.code_block_lang);
+
+        let box_width = self.max_width as usize;
+        if box_width < 4 {
+            return;
+        }
+
+        let has_lang = !lang.is_empty();
+        let lang_width = UnicodeWidthStr::width(lang.as_str());
+
+        let inner_width = box_width.saturating_sub(4);
+
+        if has_lang {
+            let lang_space = lang_width + 2;
+            if inner_width >= lang_space {
+                let dashes = inner_width - lang_space;
+                let left = dashes / 2;
+                let right = dashes - left;
+                let top = format!("┌{} {} {}┐", "─".repeat(left), lang, "─".repeat(right + 2));
+                self.push_line(Line::styled(top, code_style));
+            } else {
+                let top = format!("┌{}┐", "─".repeat(box_width.saturating_sub(2)));
+                self.push_line(Line::styled(top, code_style));
+            }
+        } else {
+            let top = format!("┌{}┐", "─".repeat(box_width.saturating_sub(2)));
+            self.push_line(Line::styled(top, code_style));
+        }
+
+        for line in lines {
+            let wrapped = wrap_code_line(line, inner_width, bg, code_style);
+            for wline in wrapped {
+                self.text.lines.push(wline);
+            }
+        }
+
+        let bottom = format!("└{}┘", "─".repeat(box_width.saturating_sub(2)));
+        self.push_line(Line::styled(bottom, code_style));
+
+        self.needs_newline = true;
+    }
+
     #[instrument(level = "trace", skip(self))]
     fn set_code_highlighter(&mut self, lang: &str) {
-        if let Some(syntax) = SYNTAX_SET.find_syntax_by_token(lang) {
-            debug!("Starting code block with syntax: {:?}", lang);
-            let theme = &THEME_SET.themes["base16-ocean.dark"];
-            let highlighter = HighlightLines::new(syntax, theme);
-            self.code_highlighter = Some(highlighter);
-        } else {
-            warn!("Could not find syntax for code block: {:?}", lang);
+        let resolved = match lang {
+            "shell" => "sh",
+            "bash" => "sh",
+            "yaml" => "yml",
+            "docker" => "Dockerfile",
+            "dockerfile" => "Dockerfile",
+            "Containerfile" => "Dockerfile",
+            "Caddyfile" => "nginx",
+            other => other,
+        };
+        let maybe_pair = SYNTAX_SET
+            .find_syntax_by_token(resolved)
+            .map(|s| (s, &*SYNTAX_SET))
+            .or_else(|| {
+                EXTRA_SYNTAX_SET
+                    .find_syntax_by_token(resolved)
+                    .map(|s| (s, &*EXTRA_SYNTAX_SET))
+            });
+        match maybe_pair {
+            Some((syntax, set)) => {
+                debug!(
+                    "Starting code block with syntax: {:?} (resolved: {:?})",
+                    lang, resolved
+                );
+                let theme = &THEME_SET.themes["base16-ocean.dark"];
+                let highlighter = HighlightLines::new(syntax, theme);
+                self.code_highlighter = Some(highlighter);
+                self.code_syntax_set = Some(set);
+            }
+            None => {
+                warn!("Could not find syntax for code block: {:?}", lang);
+            }
         }
     }
 
     #[instrument(level = "trace", skip(self))]
     fn clear_code_highlighter(&mut self) {
         self.code_highlighter = None;
+        self.code_syntax_set = None;
     }
 
     #[instrument(level = "trace", skip(self))]
@@ -565,6 +693,92 @@ where
     }
 }
 
+fn split_str_at_width(s: &str, max_width: usize) -> (&str, &str) {
+    let mut width = 0;
+    for (i, c) in s.char_indices() {
+        let cw = UnicodeWidthChar::width(c).unwrap_or(0);
+        if width + cw > max_width {
+            return (&s[..i], &s[i..]);
+        }
+        width += cw;
+    }
+    (s, "")
+}
+
+fn fill_line(line: Line<'_>, inner_width: usize, bg: Color, code_style: Style) -> Line<'_> {
+    let line_width = line.width();
+    let padding = inner_width.saturating_sub(line_width);
+    let pad_bg = Style::new().bg(bg);
+    let mut spans: Vec<Span> = vec![Span::styled("│ ", code_style)];
+    for span in line.spans {
+        spans.push(Span::styled(span.content, span.style.bg(bg)));
+    }
+    if padding > 0 {
+        spans.push(Span::styled(" ".repeat(padding), pad_bg));
+    }
+    spans.push(Span::styled(" │", code_style));
+    Line::from(spans)
+}
+
+fn wrap_code_line<'a>(
+    mut line: Line<'a>,
+    inner_width: usize,
+    bg: Color,
+    code_style: Style,
+) -> Vec<Line<'a>> {
+    let line_width = line.width();
+    if inner_width == 0 {
+        return vec![fill_line(line, 0, bg, code_style)];
+    }
+    if line_width <= inner_width {
+        return vec![fill_line(line, inner_width, bg, code_style)];
+    }
+
+    let mut spans = std::mem::take(&mut line.spans);
+    let mut result = Vec::new();
+    let mut span_idx = 0;
+
+    while span_idx < spans.len() {
+        let mut current_spans: Vec<Span> = Vec::new();
+        let mut current_width = 0;
+
+        loop {
+            if span_idx >= spans.len() {
+                break;
+            }
+            let span = &spans[span_idx];
+            let style = span.style.bg(bg);
+            let span_width = span.width();
+            let remaining = inner_width.saturating_sub(current_width);
+
+            if span_width <= remaining {
+                current_spans.push(Span::styled(span.content.to_string(), style.clone()));
+                current_width += span_width;
+                span_idx += 1;
+            } else if remaining == 0 {
+                break;
+            } else {
+                let content = span.content.as_ref();
+                let (first, second) = split_str_at_width(content, remaining);
+                if !first.is_empty() {
+                    current_spans.push(Span::styled(first.to_string(), style.clone()));
+                }
+                spans[span_idx] = Span::styled(second.to_string(), style);
+                break;
+            }
+        }
+
+        result.push(fill_line(
+            Line::from(current_spans),
+            inner_width,
+            bg,
+            code_style,
+        ));
+    }
+
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use indoc::indoc;
@@ -591,13 +805,13 @@ mod tests {
 
     #[rstest]
     fn empty(_with_tracing: DefaultGuard) {
-        assert_eq!(from_str("", None), Text::default());
+        assert_eq!(from_str("", None, 80), Text::default());
     }
 
     #[rstest]
     fn paragraph_single(_with_tracing: DefaultGuard) {
         assert_eq!(
-            from_str("Hello, world!", None),
+            from_str("Hello, world!", None, 80),
             Text::from(Line::from("Hello, world!").style(styles::p(None)))
         );
     }
@@ -610,7 +824,8 @@ mod tests {
                 Hello
                 World
             "},
-                None
+                None,
+                80
             ),
             Text::from_iter([
                 Line::from("Hello").style(styles::p(None)),
@@ -628,7 +843,8 @@ mod tests {
 
                 Paragraph 2
             "},
-                None
+                None,
+                80
             ),
             Text::from_iter([
                 Line::from("Paragraph 1").style(styles::p(None)),
@@ -649,7 +865,8 @@ mod tests {
 
                 Paragraph 2
             "},
-                None
+                None,
+                80
             ),
             Text::from_iter([
                 Line::from("Paragraph 1").style(styles::p(None)),
@@ -673,7 +890,8 @@ mod tests {
                 ##### Heading 5
                 ###### Heading 6
             "},
-                None
+                None,
+                80
             ),
             Text::from_iter([
                 Line::from_iter(["# ", "Heading 1"]).style(styles::h1(None)),
@@ -691,6 +909,24 @@ mod tests {
         );
     }
 
+    #[rstest]
+    fn heading_attributes(_with_tracing: DefaultGuard) {
+        let h1 = styles::h1(None);
+        let meta = styles::heading_meta(None);
+
+        assert_eq!(
+            from_str("# Heading {#title .primary data-kind=doc}", None, 80),
+            Text::from(
+                Line::from_iter([
+                    Span::from("# "),
+                    Span::from("Heading"),
+                    Span::styled(" {#title .primary data-kind=doc}", meta),
+                ])
+                .style(h1)
+            )
+        );
+    }
+
     /// I was having difficulty getting the right number of newlines between paragraphs, so this
     /// test is to help debug and ensure that.
     #[rstest]
@@ -702,7 +938,8 @@ mod tests {
 
                 > Blockquote
             "},
-                None
+                None,
+                80
             ),
             Text::from_iter([
                 Line::from("Hello, world!").style(styles::blockquote(None)),
@@ -714,7 +951,7 @@ mod tests {
     #[rstest]
     fn blockquote_single(_with_tracing: DefaultGuard) {
         assert_eq!(
-            from_str("> Blockquote", None),
+            from_str("> Blockquote", None, 80),
             Text::from(Line::from_iter([">", " ", "Blockquote"]).style(styles::blockquote(None)))
         );
     }
@@ -727,7 +964,8 @@ mod tests {
                 > Blockquote 1
                 > Blockquote 2
             "},
-                None
+                None,
+                80
             ),
             Text::from_iter([
                 Line::from_iter([">", " ", "Blockquote 1"]).style(styles::blockquote(None)),
@@ -745,7 +983,8 @@ mod tests {
                 >
                 > Blockquote 2
             "},
-                None
+                None,
+                80
             ),
             Text::from_iter([
                 Line::from_iter([">", " ", "Blockquote 1"]).style(styles::blockquote(None)),
@@ -764,7 +1003,8 @@ mod tests {
 
                 > Blockquote 2
             "},
-                None
+                None,
+                80
             ),
             Text::from_iter([
                 Line::from_iter([">", " ", "Blockquote 1"]).style(styles::blockquote(None)),
@@ -782,7 +1022,8 @@ mod tests {
                 > Blockquote 1
                 >> Nested Blockquote
             "},
-                None
+                None,
+                80
             ),
             Text::from_iter([
                 Line::from_iter([">", " ", "Blockquote 1"]).style(styles::blockquote(None)),
@@ -800,7 +1041,8 @@ mod tests {
                 indoc! {"
                 - List item 1
             "},
-                None
+                None,
+                80
             ),
             Text::from(Line::from_iter([
                 Span::from("\u{a0}\u{a0}• ").style(styles::list_item(None)),
@@ -817,7 +1059,8 @@ mod tests {
                 - List item 1
                 - List item 2
             "},
-                None
+                None,
+                80
             ),
             Text::from_iter([
                 Line::from_iter([
@@ -840,7 +1083,8 @@ mod tests {
                 1. List item 1
                 2. List item 2
             "},
-                None
+                None,
+                80
             ),
             Text::from_iter([
                 Line::from_iter([
@@ -863,7 +1107,8 @@ mod tests {
                 - List item 1
                   - Nested list item 1
             "},
-                None
+                None,
+                80
             ),
             Text::from_iter([
                 Line::from_iter([
@@ -886,6 +1131,7 @@ mod tests {
                 - [x] Complete
             "},
             None,
+            80,
         );
         // Just verify it parses without error and has the right number of lines
         assert_eq!(result.lines.len(), 2);
@@ -894,7 +1140,7 @@ mod tests {
     #[rstest]
     fn strong(_with_tracing: DefaultGuard) {
         assert_eq!(
-            from_str("**Strong**", None),
+            from_str("**Strong**", None, 80),
             Text::from(Line::from("Strong".bold()).style(styles::p(None)))
         );
     }
@@ -902,7 +1148,7 @@ mod tests {
     #[rstest]
     fn emphasis(_with_tracing: DefaultGuard) {
         assert_eq!(
-            from_str("*Emphasis*", None),
+            from_str("*Emphasis*", None, 80),
             Text::from(Line::from("Emphasis".italic()).style(styles::p(None)))
         );
     }
@@ -910,7 +1156,7 @@ mod tests {
     #[rstest]
     fn strikethrough(_with_tracing: DefaultGuard) {
         assert_eq!(
-            from_str("~~Strikethrough~~", None),
+            from_str("~~Strikethrough~~", None, 80),
             Text::from(Line::from("Strikethrough".crossed_out()).style(styles::p(None)))
         );
     }
@@ -918,7 +1164,7 @@ mod tests {
     #[rstest]
     fn strong_emphasis(_with_tracing: DefaultGuard) {
         assert_eq!(
-            from_str("**Strong *emphasis***", None),
+            from_str("**Strong *emphasis***", None, 80),
             Text::from(
                 Line::from_iter(["Strong ".bold(), "emphasis".bold().italic()])
                     .style(styles::p(None))
@@ -929,7 +1175,7 @@ mod tests {
     #[rstest]
     fn superscript(_with_tracing: DefaultGuard) {
         assert_eq!(
-            from_str("H ^2^ O", None),
+            from_str("H ^2^ O", None, 80),
             Text::from(
                 Line::from_iter([
                     Span::from("H "),
@@ -944,7 +1190,7 @@ mod tests {
     #[rstest]
     fn subscript(_with_tracing: DefaultGuard) {
         assert_eq!(
-            from_str("H ~2~ O", None),
+            from_str("H ~2~ O", None, 80),
             Text::from(
                 Line::from_iter([
                     Span::from("H "),
@@ -967,7 +1213,8 @@ mod tests {
 
                 Body
             "},
-                None
+                None,
+                80
             ),
             Text::from_iter([
                 Line::from("---").style(Style::new().fg(Color::Rgb(255, 255, 255))),
@@ -982,7 +1229,7 @@ mod tests {
     #[rstest]
     fn link(_with_tracing: DefaultGuard) {
         assert_eq!(
-            from_str("[Link](https://example.com)", None),
+            from_str("[Link](https://example.com)", None, 80),
             Text::from(
                 Line::from_iter([
                     Span::from("Link"),
@@ -1000,7 +1247,7 @@ mod tests {
     #[rstest]
     fn image(_with_tracing: DefaultGuard) {
         assert_eq!(
-            from_str("![TestImage](/test.html)", None),
+            from_str("![TestImage](/test.html)", None, 80),
             Text::from_iter([
                 Line::default().style(styles::p(None)),
                 Line::from_iter([

@@ -141,6 +141,18 @@ pub fn link(theme: Option<&Theme>) -> Style {
         .add_modifier(Modifier::UNDERLINED)
 }
 
+pub fn heading_meta(theme: Option<&Theme>) -> Style {
+    let meta_color = if let Some(t) = theme {
+        t.base[0x04]
+    } else {
+        0x888888
+    };
+
+    Style::new()
+        .fg(Color::from_u32(meta_color))
+        .add_modifier(Modifier::DIM)
+}
+
 pub fn metadata(theme: Option<&Theme>) -> Style {
     let metadata_color = if let Some(t) = theme {
         t.base[0x0a]

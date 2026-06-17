@@ -210,7 +210,11 @@ impl AppScreen for ReaderScreen {
         frame.render_widget(date, contentlayout[2]);
 
         // Content
-        let text = tuimarkdown::from_str(&current_entry.text, Some(theme.clone()));
+        let text = tuimarkdown::from_str(
+            &current_entry.text,
+            Some(theme.clone()),
+            contentlayout[3].width,
+        );
         let textheight = text.height() as usize;
 
         // This is a workaround to get more or less the amount of wrapped lines, to be used on the
