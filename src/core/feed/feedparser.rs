@@ -4,7 +4,7 @@ use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
 use color_eyre::eyre::{bail, eyre};
 use html2md_bulletty::parse_html;
 use regex::Regex;
-use reqwest::blocking::Client;
+use reqwest::{Client, blocking::Client as BlockingClient};
 use roxmltree::Node;
 use slug::slugify;
 use tracing::error;
@@ -16,7 +16,7 @@ use crate::core::{
 };
 
 pub fn get_feed_with_data(url: &str) -> color_eyre::Result<(FeedItem, String)> {
-    let client = Client::builder()
+    let client = BlockingClient::builder()
         .user_agent(format!("bulletty/{}", env!("CARGO_PKG_VERSION")))
         .build()?;
 
@@ -126,12 +126,11 @@ fn parse(doc: &str, feed_url: &str) -> color_eyre::Result<FeedItem> {
     Ok(feed)
 }
 
-pub fn get_feed_entries(feed: &FeedItem) -> color_eyre::Result<Vec<FeedEntry>> {
-    let client = Client::builder()
-        .user_agent(format!("bulletty/{}", env!("CARGO_PKG_VERSION")))
-        .build()?;
-
-    let response = client.get(&feed.feed_url).send()?;
+pub async fn get_feed_entries(
+    client: &Client,
+    feed: &FeedItem,
+) -> color_eyre::Result<Vec<FeedEntry>> {
+    let response = client.get(&feed.feed_url).send().await?;
 
     if !response.status().is_success() {
         return Err(eyre!(
@@ -141,7 +140,7 @@ pub fn get_feed_entries(feed: &FeedItem) -> color_eyre::Result<Vec<FeedEntry>> {
         ));
     }
 
-    let body = response.text()?;
+    let body = response.text().await?;
     get_feed_entries_doc(&body, &feed.author)
 }
 

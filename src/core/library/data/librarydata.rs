@@ -164,19 +164,27 @@ impl LibraryData {
         &self,
         category: &str,
         feed: &FeedItem,
-        feedxml: Option<String>,
+        feedxml: String,
     ) -> color_eyre::Result<()> {
-        // TODO: hard coding 5 minutes for now
-        if Utc::now().signed_duration_since(feed.lastupdated) < Duration::minutes(5) {
+        if !Self::feed_needs_update(feed) {
             return Ok(());
         }
 
-        let mut feedentries = if let Some(txt) = feedxml {
-            feedparser::get_feed_entries_doc(&txt, &feed.author)
-        } else {
-            feedparser::get_feed_entries(feed)
-        }?;
+        let feedentries = feedparser::get_feed_entries_doc(&feedxml, &feed.author)?;
 
+        self.apply_feed_update(category, feed, feedentries)
+    }
+
+    pub fn feed_needs_update(feed: &FeedItem) -> bool {
+        Utc::now().signed_duration_since(feed.lastupdated) >= Duration::minutes(5)
+    }
+
+    pub fn apply_feed_update(
+        &self,
+        category: &str,
+        feed: &FeedItem,
+        mut feedentries: Vec<FeedEntry>,
+    ) -> color_eyre::Result<()> {
         feedentries.iter_mut().for_each(|e| {
             let entrypath = self
                 .path
