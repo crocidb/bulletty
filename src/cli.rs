@@ -85,7 +85,9 @@ pub fn run_main_cli(
     match &cli.command {
         Some(Commands::List) => command_list(&cli, &config.datapath),
         Some(Commands::Add { url, category }) => command_add(&cli, url, category, &config.datapath),
-        Some(Commands::Update) => command_update(&cli, &config.datapath),
+        Some(Commands::Update) => {
+            command_update(&cli, &config.datapath, config.parallel_feed_updates)
+        }
         Some(Commands::Delete { ident }) => command_delete(&cli, ident, &config.datapath),
         Some(Commands::Dirs { subcmd }) => command_dirs(&cli, subcmd, dirs, config, config_store),
         Some(Commands::Import { opml_file }) => command_import(&cli, opml_file, &config.datapath),
@@ -130,7 +132,11 @@ fn command_add(
     Ok(())
 }
 
-fn command_update(_cli: &Cli, data_dir: &Path) -> color_eyre::Result<()> {
+fn command_update(
+    _cli: &Cli,
+    data_dir: &Path,
+    parallel_feed_updates: Option<bool>,
+) -> color_eyre::Result<()> {
     let library = FeedLibrary::new(data_dir);
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -138,6 +144,7 @@ fn command_update(_cli: &Cli, data_dir: &Path) -> color_eyre::Result<()> {
     let summary = runtime.block_on(update_feeds(
         library.feedcategories,
         data_dir,
+        parallel_feed_updates,
         |title, status| match status {
             FeedUpdateStatus::Updated => {
                 info!("Updated {title}");

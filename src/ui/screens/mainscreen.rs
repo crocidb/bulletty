@@ -168,7 +168,7 @@ impl MainScreen {
     fn force_update(&mut self) {
         let mut feed_library = self.library.borrow_mut();
         if feed_library.updater.is_none() {
-            feed_library.start_updater();
+            feed_library.start_updater(self.config.parallel_feed_updates);
         }
     }
 }
@@ -176,7 +176,9 @@ impl MainScreen {
 impl AppScreen for MainScreen {
     fn start(&mut self) {
         if !matches!(self.config.tui_auto_update, Some(false)) {
-            self.library.borrow_mut().start_updater();
+            self.library
+                .borrow_mut()
+                .start_updater(self.config.parallel_feed_updates);
         }
     }
 

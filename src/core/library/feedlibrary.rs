@@ -141,8 +141,12 @@ impl FeedLibrary {
         Ok(vec![])
     }
 
-    pub fn start_updater(&mut self) {
-        self.updater = Some(Updater::new(self.feedcategories.clone(), &self.data.path));
+    pub fn start_updater(&mut self, parallel_feed_updates: Option<bool>) {
+        self.updater = Some(Updater::new(
+            self.feedcategories.clone(),
+            &self.data.path,
+            parallel_feed_updates,
+        ));
     }
 
     pub fn bump_generation(&mut self) {

@@ -48,6 +48,7 @@ pub struct FeedUpdateSummary {
 pub async fn update_feeds(
     feedcategories: Vec<FeedCategory>,
     data_dir: &Path,
+    parallel_feed_updates: Option<bool>,
     mut on_complete: impl FnMut(&str, &FeedUpdateStatus),
 ) -> color_eyre::Result<FeedUpdateSummary> {
     let feeds: Vec<FeedItem> = feedcategories
@@ -73,10 +74,14 @@ pub async fn update_feeds(
         return Ok(summary);
     }
 
-    let parallelism = std::thread::available_parallelism()
-        .map(usize::from)
-        .unwrap_or(1)
-        .min(pending.len());
+    let parallelism = if matches!(parallel_feed_updates, Some(true)) {
+        std::thread::available_parallelism()
+            .map(usize::from)
+            .unwrap_or(1)
+            .min(pending.len())
+    } else {
+        1
+    };
 
     let client = Client::builder()
         .user_agent(format!("bulletty/{}", env!("CARGO_PKG_VERSION")))
@@ -150,7 +155,11 @@ pub struct Updater {
 }
 
 impl Updater {
-    pub fn new(feedcategories: Vec<FeedCategory>, data_dir: &Path) -> Self {
+    pub fn new(
+        feedcategories: Vec<FeedCategory>,
+        data_dir: &Path,
+        parallel_feed_updates: Option<bool>,
+    ) -> Self {
         let total = feedcategories
             .iter()
             .map(|category| category.feeds.len())
@@ -180,8 +189,11 @@ impl Updater {
                 }
             };
 
-            let result =
-                runtime.block_on(update_feeds(feedcategories, &data_dir, |title, status| {
+            let result = runtime.block_on(update_feeds(
+                feedcategories,
+                &data_dir,
+                parallel_feed_updates,
+                |title, status| {
                     let completed = total_completed_clone.fetch_add(1, Ordering::Relaxed) + 1;
                     if matches!(status, FeedUpdateStatus::Updated) {
                         total_updated_clone.fetch_add(1, Ordering::Relaxed);
@@ -194,7 +206,8 @@ impl Updater {
                     } else {
                         info!("{} {title}", status.label());
                     }
-                }));
+                },
+            ));
 
             if let Err(update_error) = result {
                 error!("Feed update batch failed: {update_error}");

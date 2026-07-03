@@ -20,6 +20,9 @@ These settings reside at the top level.
 ### `tui_auto_update`
 Update the library on launch of the TUI. Accepts a boolean. Defaults to `true`.
 
+### `parallel_feed_updates`
+Fetch feed updates concurrently. Accepts a boolean. Defaults to `false`.
+
 ## 🪝 Hooks
 Hooks are set in the `[hooks]` table and allow you to specify shell commands to run at key lifecycle points. See [Hooks](../hooks/) for specific details.
 
@@ -27,6 +30,7 @@ Hooks are set in the `[hooks]` table and allow you to specify shell commands to 
 ```toml
 datapath = "~/.local/share/bulletty" # Specify the directory for storing the Library
 tui_auto_update = true               # Fetch new content on TUI launch
+parallel_feed_updates = true         # Enable concurrent feed updates
 
 [hooks]
 before_tui = "some-command" # Specify a shell command to run before the TUI launches

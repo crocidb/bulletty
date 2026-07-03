@@ -14,6 +14,8 @@ pub struct Config {
     pub hooks: Option<AppHooks>,
     #[serde(default)]
     pub tui_auto_update: Option<bool>,
+    #[serde(default)]
+    pub parallel_feed_updates: Option<bool>,
 }
 
 pub struct ConfigStore {
