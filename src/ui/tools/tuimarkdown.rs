@@ -348,7 +348,8 @@ where
     fn text(&mut self, text: CowStr<'a>) {
         if let Some(highlighter) = &mut self.code_highlighter {
             let set = self.code_syntax_set.unwrap();
-            let text: Text = LinesWithEndings::from(&text)
+            let expanded = text.replace('\t', "  ");
+            let text: Text = LinesWithEndings::from(&expanded)
                 .filter_map(|line| highlighter.highlight_line(line, set).ok())
                 .filter_map(|part| as_24_bit_terminal_escaped(&part, false).into_text().ok())
                 .flatten()
@@ -914,7 +915,7 @@ mod tests {
         let meta = styles::heading_meta(None);
 
         assert_eq!(
-            from_str("# Heading {#title .primary data-kind=doc}", None),
+            from_str("# Heading {#title .primary data-kind=doc}", None, 80),
             Text::from(
                 Line::from_iter([
                     Span::from("# "),
