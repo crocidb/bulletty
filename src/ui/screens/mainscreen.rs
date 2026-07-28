@@ -5,7 +5,8 @@ use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Color, Style, Stylize},
-    widgets::{Block, List, Padding, Scrollbar, ScrollbarOrientation, ScrollbarState},
+    text::{Line, Span},
+    widgets::{Block, List, Padding, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
 };
 use tracing::error;
 
@@ -256,6 +257,9 @@ impl AppScreen for MainScreen {
             Style::default().bg(Color::from_u32(theme.base[2]))
         };
 
+        let entrychunks =
+            Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).split(chunks[1]);
+
         let list_widget = List::new(self.feedentrystate.get_items())
             .block(
                 Block::default()
@@ -264,7 +268,68 @@ impl AppScreen for MainScreen {
             )
             .highlight_style(entryselectionstyle);
 
-        frame.render_stateful_widget(list_widget, chunks[1], &mut entryliststate);
+        frame.render_stateful_widget(list_widget, entrychunks[0], &mut entryliststate);
+
+        // Feed source status line
+        let (statusicon, statusname, statusslug) = match self.feedtreestate.get_selected() {
+            Some(FeedItemInfo::Category(t)) => ("\u{f07c}", t.as_str(), ""),
+            Some(FeedItemInfo::Item(t, _, s)) => ("\u{f09e}", t.as_str(), s.as_str()),
+            Some(FeedItemInfo::ReadLater) => ("\u{f02d}", "Read Later", ""),
+            _ => ("", "", ""),
+        };
+
+        let statusurl = if statusslug.is_empty() {
+            String::new()
+        } else {
+            self.library
+                .borrow()
+                .feedcategories
+                .iter()
+                .flat_map(|c| c.feeds.iter())
+                .find(|f| f.slug == statusslug)
+                .map(|f| f.url.clone())
+                .unwrap_or_default()
+        };
+
+        let total = self.feedentrystate.entries.len();
+        let unread = self
+            .feedentrystate
+            .entries
+            .iter()
+            .filter(|e| !e.seen)
+            .count();
+
+        let mutedstyle = Style::default().fg(Color::from_u32(theme.base[0]));
+        let highlightstyle = Style::default().fg(Color::from_u32(theme.base[2])).bold();
+        let unreadstyle = if unread == 0 {
+            mutedstyle
+        } else {
+            highlightstyle
+        };
+
+        let statusline = if statusname.is_empty() {
+            Line::from("")
+        } else {
+            let mut spans = vec![Span::styled(
+                format!(" {statusicon} {statusname}"),
+                highlightstyle,
+            )];
+            if !statusurl.is_empty() {
+                spans.push(Span::styled(format!(" | {statusurl}"), mutedstyle));
+            }
+            spans.push(Span::styled(" | ", mutedstyle));
+            spans.push(Span::styled(format!("{unread}"), unreadstyle));
+            spans.push(Span::styled(format!("/{total}"), mutedstyle));
+            Line::from(spans)
+        };
+
+        let status_widget = Paragraph::new(statusline).block(
+            Block::default()
+                .style(Style::default().bg(Color::from_u32(theme.base[4])))
+                .padding(Padding::new(0, 0, 0, 0)),
+        );
+
+        frame.render_widget(status_widget, entrychunks[1]);
 
         // Scrollbar
         let mut scrollbarstate = ScrollbarState::new(self.feedentrystate.scroll_max())
