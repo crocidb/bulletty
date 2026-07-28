@@ -9,6 +9,7 @@ use crate::core::config::ConfigStore;
 use crate::core::library::data::opml;
 use crate::core::library::feeditem::FeedItem;
 use crate::core::library::feedlibrary::FeedLibrary;
+use crate::core::library::updater::{FeedUpdateStatus, update_feeds};
 use crate::dirs::Directories;
 
 #[derive(Parser)]
@@ -84,7 +85,9 @@ pub fn run_main_cli(
     match &cli.command {
         Some(Commands::List) => command_list(&cli, &config.datapath),
         Some(Commands::Add { url, category }) => command_add(&cli, url, category, &config.datapath),
-        Some(Commands::Update) => command_update(&cli, &config.datapath),
+        Some(Commands::Update) => {
+            command_update(&cli, &config.datapath, config.parallel_feed_updates)
+        }
         Some(Commands::Delete { ident }) => command_delete(&cli, ident, &config.datapath),
         Some(Commands::Dirs { subcmd }) => command_dirs(&cli, subcmd, dirs, config, config_store),
         Some(Commands::Import { opml_file }) => command_import(&cli, opml_file, &config.datapath),
@@ -129,20 +132,49 @@ fn command_add(
     Ok(())
 }
 
-fn command_update(_cli: &Cli, data_dir: &Path) -> color_eyre::Result<()> {
+fn command_update(
+    _cli: &Cli,
+    data_dir: &Path,
+    parallel_feed_updates: Option<bool>,
+) -> color_eyre::Result<()> {
     let library = FeedLibrary::new(data_dir);
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    let summary = runtime.block_on(update_feeds(
+        library.feedcategories,
+        data_dir,
+        parallel_feed_updates,
+        |title, status| match status {
+            FeedUpdateStatus::Updated => {
+                info!("Updated {title}");
+                println!("Updated {title}");
+            }
+            FeedUpdateStatus::Skipped => {
+                info!("Skipped {title} (updated recently)");
+                println!("Skipped {title} (updated recently)");
+            }
+            FeedUpdateStatus::Failed(update_error) => {
+                error!("Failed to update {title}: {update_error}");
+                println!("Failed {title}: {update_error}");
+            }
+        },
+    ))?;
 
-    for category in library.feedcategories.iter() {
-        for feed in category.feeds.iter() {
-            info!("Updating {}", feed.title);
-            println!("Updating {}", feed.title);
-            library
-                .data
-                .update_feed_entries(&category.title, feed, None)?;
-        }
+    println!(
+        "Update complete: {} updated, {} skipped, {} failed",
+        summary.updated, summary.skipped, summary.failed
+    );
+
+    if summary.failed == 0 {
+        Ok(())
+    } else {
+        Err(color_eyre::eyre::eyre!(
+            "{} of {} feed updates failed",
+            summary.failed,
+            summary.total
+        ))
     }
-
-    Ok(())
 }
 
 fn confirm_delete(title: &str) -> Result<bool, Error> {

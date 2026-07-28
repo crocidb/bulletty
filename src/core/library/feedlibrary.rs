@@ -25,7 +25,7 @@ pub struct FeedLibrary {
     pub updater: Option<Updater>,
     pub settings: UserSettings,
     pub generation: u64,
-    last_updater_completed: u16,
+    previous_updated_count: usize,
 }
 
 impl FeedLibrary {
@@ -46,7 +46,7 @@ impl FeedLibrary {
             updater: None,
             settings: UserSettings::new(data_dir).unwrap(),
             generation: 0,
-            last_updater_completed: 0,
+            previous_updated_count: 0,
         }
     }
 
@@ -61,7 +61,7 @@ impl FeedLibrary {
                 updater: None,
                 settings: UserSettings::new(temp_dir.path()).unwrap(),
                 generation: 0,
-                last_updater_completed: 0,
+                previous_updated_count: 0,
             },
             temp_dir,
         )
@@ -95,9 +95,9 @@ impl FeedLibrary {
         self.data.feed_create(&feed)?;
 
         // then update
-        // but let's only update the text is present. because of tests. maybve not the best
+        // but let's only update if the text is present. because of tests. maybe not the best
         // approach, but...
-        if text.is_some() {
+        if let Some(text) = text {
             self.data.update_feed_entries(&feed.category, &feed, text)?;
         }
 
@@ -141,8 +141,12 @@ impl FeedLibrary {
         Ok(vec![])
     }
 
-    pub fn start_updater(&mut self) {
-        self.updater = Some(Updater::new(self.feedcategories.clone(), &self.data.path));
+    pub fn start_updater(&mut self, parallel_feed_updates: Option<bool>) {
+        self.updater = Some(Updater::new(
+            self.feedcategories.clone(),
+            &self.data.path,
+            parallel_feed_updates,
+        ));
     }
 
     pub fn bump_generation(&mut self) {
@@ -161,37 +165,38 @@ impl FeedLibrary {
 
     pub fn update(&mut self) {
         if let Some(updater) = self.updater.as_ref() {
-            let completed = updater
-                .total_completed
+            let finished = updater.finished.load(std::sync::atomic::Ordering::Acquire);
+            let updated = updater
+                .total_updated
                 .load(std::sync::atomic::Ordering::Relaxed);
-            if completed > self.last_updater_completed {
-                self.last_updater_completed = completed;
+            if updated > self.previous_updated_count {
+                self.previous_updated_count = updated;
                 self.generation += 1;
             }
 
-            if updater.finished.load(std::sync::atomic::Ordering::Relaxed) {
+            if finished {
                 self.updater = None;
-                self.last_updater_completed = 0;
-                self.generation += 1;
+                self.previous_updated_count = 0;
             }
         }
     }
 
     pub fn get_update_status(&self) -> AppWorkStatus {
         if let Some(updater) = self.updater.as_ref() {
-            let total: f32 = self
-                .feedcategories
-                .iter()
-                .map(|cat| cat.feeds.len() as f32)
-                .sum();
+            let total = updater.total as f32;
 
             AppWorkStatus::Working(
-                1.0_f32.min(
-                    updater
-                        .total_completed
-                        .load(std::sync::atomic::Ordering::Relaxed) as f32
-                        / total,
-                ),
+                if total == 0.0 {
+                    1.0
+                } else {
+                    1.0_f32.min(
+                        updater
+                            .total_completed
+                            .load(std::sync::atomic::Ordering::Relaxed)
+                            as f32
+                            / total,
+                    )
+                },
                 updater.last_completed.lock().unwrap().to_string(),
             )
         } else {
