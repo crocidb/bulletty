@@ -21,7 +21,7 @@ These settings reside at the top level.
 Update the library on launch of the TUI. Accepts a boolean. Defaults to `true`.
 
 ### `parallel_feed_updates`
-Fetch feed updates concurrently. Accepts a boolean. Defaults to `false`.
+Fetch feed updates concurrently. Accepts a boolean. Defaults to `true`.
 
 ## 🪝 Hooks
 Hooks are set in the `[hooks]` table and allow you to specify shell commands to run at key lifecycle points. See [Hooks](../hooks/) for specific details.
