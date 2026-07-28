@@ -19,6 +19,7 @@ use crate::core::{
 };
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+const MAX_CONCURRENT_FETCHES: usize = 16;
 
 #[derive(Debug)]
 pub enum FeedUpdateStatus {
@@ -75,10 +76,7 @@ pub async fn update_feeds(
     }
 
     let parallelism = if matches!(parallel_feed_updates, Some(true)) {
-        std::thread::available_parallelism()
-            .map(usize::from)
-            .unwrap_or(1)
-            .min(pending.len())
+        MAX_CONCURRENT_FETCHES.min(pending.len())
     } else {
         1
     };
