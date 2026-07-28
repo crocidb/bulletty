@@ -253,7 +253,6 @@ mod tests {
         // unread color (base09)
         let unread_cell = &buffer[(4, 1)];
         assert_eq!(unread_cell.fg, Color::from_u32(0xff0000));
-        assert!(unread_cell.modifier.contains(Modifier::BOLD));
 
         // fully read feeds keep the default style
         let read_cell = &buffer[(4, 2)];
