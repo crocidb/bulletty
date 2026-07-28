@@ -1,8 +1,12 @@
 use std::collections::HashMap;
 
-use ratatui::widgets::{ListItem, ListState};
+use ratatui::{
+    style::{Color, Style},
+    text::{Line, Span},
+    widgets::{ListItem, ListState},
+};
 
-use crate::core::library::feedlibrary::FeedLibrary;
+use crate::core::library::{feedlibrary::FeedLibrary, settings::theme::Theme};
 
 pub enum FeedItemInfo {
     /// Represents the category title
@@ -18,6 +22,7 @@ pub enum FeedItemInfo {
 pub struct FeedTreeState {
     pub treeitems: Vec<FeedItemInfo>,
     pub listatate: ListState,
+    theme: Theme,
     last_generation: u64,
     unread_counts: HashMap<(String, String), u16>,
     read_later_count: usize,
@@ -34,6 +39,7 @@ impl FeedTreeState {
         Self {
             treeitems: vec![],
             listatate: ListState::default().with_selected(Some(0)),
+            theme: Theme::default(),
             last_generation: u64::MAX,
             unread_counts: HashMap::new(),
             read_later_count: 0,
@@ -41,6 +47,8 @@ impl FeedTreeState {
     }
 
     pub fn update(&mut self, library: &mut FeedLibrary) {
+        self.theme = library.settings.get_theme().unwrap().clone();
+
         if library.generation == self.last_generation {
             return;
         }
@@ -82,32 +90,31 @@ impl FeedTreeState {
     pub fn get_items(&self) -> Vec<ListItem<'_>> {
         self.treeitems
             .iter()
-            .map(|item| {
-                let title = match item {
-                    FeedItemInfo::Category(t) => format!("\u{f07c} {t}"),
-                    FeedItemInfo::Item(t, c, s) => {
-                        let unread = self
-                            .unread_counts
-                            .get(&(c.clone(), s.clone()))
-                            .copied()
-                            .unwrap_or(0);
-                        if unread > 0 {
-                            format!(" \u{f09e}  {t} ({unread})")
-                        } else {
-                            format!(" \u{f09e}  {t}")
-                        }
+            .map(|item| match item {
+                FeedItemInfo::Category(t) => ListItem::new(format!("\u{f07c} {t}")),
+                FeedItemInfo::Item(t, c, s) => {
+                    let unread = self
+                        .unread_counts
+                        .get(&(c.clone(), s.clone()))
+                        .copied()
+                        .unwrap_or(0);
+                    if unread > 0 {
+                        ListItem::new(Line::from(Span::styled(
+                            format!(" \u{f09e}  ({unread}) {t}"),
+                            Style::default().fg(Color::from_u32(self.theme.base[9])),
+                        )))
+                    } else {
+                        ListItem::new(format!(" \u{f09e}  {t}"))
                     }
-                    FeedItemInfo::Separator => "".to_string(),
-                    FeedItemInfo::ReadLater => {
-                        if self.read_later_count > 0 {
-                            format!("\u{f02d} Read Later ({})", self.read_later_count)
-                        } else {
-                            "\u{f02d} Read Later".to_string()
-                        }
+                }
+                FeedItemInfo::Separator => ListItem::new(""),
+                FeedItemInfo::ReadLater => {
+                    if self.read_later_count > 0 {
+                        ListItem::new(format!("\u{f02d} ({}) Read Later", self.read_later_count))
+                    } else {
+                        ListItem::new("\u{f02d} Read Later")
                     }
-                };
-
-                ListItem::new(title.clone())
+                }
             })
             .collect()
     }
@@ -201,5 +208,71 @@ impl FeedTreeState {
         } else {
             false
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use ratatui::{Terminal, backend::TestBackend, style::Modifier, widgets::List};
+
+    use super::*;
+
+    fn row_text(buffer: &ratatui::buffer::Buffer, y: u16, width: u16) -> String {
+        (0..width)
+            .map(|x| buffer[(x, y)].symbol().to_string())
+            .collect()
+    }
+
+    #[test]
+    fn test_unread_feed_format_and_style() {
+        let mut state = FeedTreeState::new();
+        state.theme.base[9] = 0xff0000;
+        state.treeitems = vec![
+            FeedItemInfo::Category("Tech".into()),
+            FeedItemInfo::Item("Unread Feed".into(), "Tech".into(), "unread".into()),
+            FeedItemInfo::Item("Read Feed".into(), "Tech".into(), "read".into()),
+        ];
+        state
+            .unread_counts
+            .insert(("Tech".into(), "unread".into()), 12);
+
+        let backend = TestBackend::new(30, 3);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| f.render_widget(List::new(state.get_items()), f.area()))
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+
+        // unread count goes before the feed title
+        assert!(row_text(buffer, 1, 30).contains(" (12) Unread Feed"));
+        assert!(row_text(buffer, 2, 30).contains(" Read Feed"));
+        assert!(!row_text(buffer, 2, 30).contains("(0)"));
+
+        // feeds with unread articles are bold and colored with the theme's
+        // unread color (base09)
+        let unread_cell = &buffer[(4, 1)];
+        assert_eq!(unread_cell.fg, Color::from_u32(0xff0000));
+        assert!(unread_cell.modifier.contains(Modifier::BOLD));
+
+        // fully read feeds keep the default style
+        let read_cell = &buffer[(4, 2)];
+        assert_eq!(read_cell.fg, Color::Reset);
+        assert!(!read_cell.modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn test_read_later_format() {
+        let mut state = FeedTreeState::new();
+        state.treeitems = vec![FeedItemInfo::ReadLater];
+        state.read_later_count = 5;
+
+        let backend = TestBackend::new(30, 1);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| f.render_widget(List::new(state.get_items()), f.area()))
+            .unwrap();
+
+        assert!(row_text(terminal.backend().buffer(), 0, 30).contains("(5) Read Later"));
     }
 }
