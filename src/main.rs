@@ -26,7 +26,7 @@ pub fn run() -> color_eyre::Result<()> {
         datapath: dirs.default_data().into(),
         hooks: None,
         tui_auto_update: Some(true),
-        parallel_feed_updates: Some(false),
+        parallel_feed_updates: Some(true),
     })?;
 
     let cli = cli::Cli::parse();

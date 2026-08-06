@@ -61,7 +61,7 @@ pub fn get_feed_with_data(url: &str) -> color_eyre::Result<(FeedItem, String)> {
     }
 
     let (etag, last_modified) = response_validators(response.headers());
-    let body = response.text()?;
+    let body = response.text()?.trim().to_string();
 
     // If the response is HTML try to follow metadata feed links
     if html::is_html(&body) {
@@ -190,7 +190,7 @@ pub async fn get_feed_entries(client: &Client, feed: &FeedItem) -> color_eyre::R
         ));
     }
 
-    let body = response.text().await?;
+    let body = response.text().await?.trim().to_string();
     let entries = get_feed_entries_doc(&body, &feed.author)?;
     Ok(FeedFetch::Modified {
         entries,
@@ -448,6 +448,12 @@ fn strip_markdown_tags(input: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::{
+        io::{Read, Write},
+        net::TcpListener,
+        thread,
+    };
+
     use chrono::TimeZone;
 
     use super::*;
@@ -632,6 +638,53 @@ mod tests {
             .unwrap()
             .with_timezone(&Utc);
         assert_eq!(b.date, expected_b_date);
+    }
+
+    #[test]
+    fn get_feed_entries_trims_trailing_response_whitespace() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Example RSS</title>
+    <item>
+      <title>Item 1</title>
+      <link>https://example.com/item1</link>
+    </item>
+  </channel>
+</rss>
+"#;
+        let body = format!("  \n{xml}   \n");
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0; 1024];
+            let _ = stream.read(&mut request);
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            )
+            .unwrap();
+        });
+
+        let client = Client::new();
+        let feed = FeedItem {
+            feed_url: format!("http://{address}"),
+            author: "Example Author".to_string(),
+            ..Default::default()
+        };
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let entries = runtime.block_on(get_feed_entries(&client, &feed)).unwrap();
+
+        server.join().unwrap();
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].title, "Item 1");
     }
 
     #[test]

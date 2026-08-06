@@ -75,10 +75,10 @@ pub async fn update_feeds(
         return Ok(summary);
     }
 
-    let parallelism = if matches!(parallel_feed_updates, Some(true)) {
-        MAX_CONCURRENT_FETCHES.min(pending.len())
-    } else {
+    let parallelism = if matches!(parallel_feed_updates, Some(false)) {
         1
+    } else {
+        MAX_CONCURRENT_FETCHES.min(pending.len())
     };
 
     let client = Client::builder()

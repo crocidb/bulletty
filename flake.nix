@@ -13,6 +13,7 @@
       mkBuildInputs = pkgs: with pkgs; [
         rustc
         cargo
+        cargo-dist
         clippy
         rustfmt
         rust-analyzer
@@ -34,6 +35,7 @@
               export HOME="$PWD/.dev-home"
               mkdir -p "$HOME"
               echo "Isolated HOME set to: $HOME"
+              alias bulletty="cargo run --release --"
             '';
           };
         }
