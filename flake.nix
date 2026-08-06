@@ -13,6 +13,7 @@
       mkBuildInputs = pkgs: with pkgs; [
         rustc
         cargo
+        cargo-dist
         clippy
         rustfmt
         rust-analyzer
