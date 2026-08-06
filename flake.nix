@@ -34,6 +34,7 @@
               export HOME="$PWD/.dev-home"
               mkdir -p "$HOME"
               echo "Isolated HOME set to: $HOME"
+              alias bulletty="cargo run --release --"
             '';
           };
         }
