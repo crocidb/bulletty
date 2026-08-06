@@ -175,6 +175,12 @@ impl FeedLibrary {
             }
 
             if finished {
+                match self.data.generate_categories_tree() {
+                    Ok(categories) => self.feedcategories = categories,
+                    Err(refresh_error) => {
+                        error!("Failed to refresh feeds after update: {refresh_error}");
+                    }
+                }
                 self.updater = None;
                 self.previous_updated_count = 0;
             }
