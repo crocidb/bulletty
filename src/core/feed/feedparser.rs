@@ -30,7 +30,7 @@ pub fn get_feed_with_data(url: &str) -> color_eyre::Result<(FeedItem, String)> {
         ));
     }
 
-    let body = response.text()?;
+    let body = response.text()?.trim().to_string();
 
     // If the response is HTML try to follow metadata feed links
     if html::is_html(&body) {
