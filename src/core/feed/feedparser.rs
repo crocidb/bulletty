@@ -4,7 +4,11 @@ use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
 use color_eyre::eyre::{bail, eyre};
 use html2md_bulletty::parse_html;
 use regex::Regex;
-use reqwest::{Client, blocking::Client as BlockingClient};
+use reqwest::{
+    Client, StatusCode,
+    blocking::Client as BlockingClient,
+    header::{ETAG, HeaderMap, IF_MODIFIED_SINCE, IF_NONE_MATCH, LAST_MODIFIED},
+};
 use roxmltree::Node;
 use slug::slugify;
 use tracing::error;
@@ -14,6 +18,32 @@ use crate::core::{
     feed::{feedentry::FeedEntry, feedutils, html},
     library::feeditem::FeedItem,
 };
+
+#[derive(Debug)]
+pub enum FeedFetch {
+    Modified {
+        entries: Vec<FeedEntry>,
+        etag: Option<String>,
+        last_modified: Option<String>,
+    },
+    NotModified {
+        etag: Option<String>,
+        last_modified: Option<String>,
+    },
+}
+
+fn response_validators(headers: &HeaderMap) -> (Option<String>, Option<String>) {
+    let etag = headers
+        .get(ETAG)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned);
+    let last_modified = headers
+        .get(LAST_MODIFIED)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned);
+
+    (etag, last_modified)
+}
 
 pub fn get_feed_with_data(url: &str) -> color_eyre::Result<(FeedItem, String)> {
     let client = BlockingClient::builder()
@@ -30,6 +60,7 @@ pub fn get_feed_with_data(url: &str) -> color_eyre::Result<(FeedItem, String)> {
         ));
     }
 
+    let (etag, last_modified) = response_validators(response.headers());
     let body = response.text()?.trim().to_string();
 
     // If the response is HTML try to follow metadata feed links
@@ -49,7 +80,11 @@ pub fn get_feed_with_data(url: &str) -> color_eyre::Result<(FeedItem, String)> {
             .ok_or_else(|| eyre!("No embedded RSS/Atom feed links found at \"{url}\""));
     }
 
-    Ok((parse(&body, url)?, body))
+    let mut feed = parse(&body, url)?;
+    feed.etag = etag;
+    feed.last_modified = last_modified;
+
+    Ok((feed, body))
 }
 
 pub fn get_feed(url: &str) -> color_eyre::Result<FeedItem> {
@@ -126,22 +161,42 @@ fn parse(doc: &str, feed_url: &str) -> color_eyre::Result<FeedItem> {
     Ok(feed)
 }
 
-pub async fn get_feed_entries(
-    client: &Client,
-    feed: &FeedItem,
-) -> color_eyre::Result<Vec<FeedEntry>> {
-    let response = client.get(&feed.feed_url).send().await?;
+pub async fn get_feed_entries(client: &Client, feed: &FeedItem) -> color_eyre::Result<FeedFetch> {
+    let mut request = client.get(&feed.feed_url);
 
-    if !response.status().is_success() {
+    if let Some(etag) = &feed.etag {
+        request = request.header(IF_NONE_MATCH, etag);
+    }
+    if let Some(last_modified) = &feed.last_modified {
+        request = request.header(IF_MODIFIED_SINCE, last_modified);
+    }
+
+    let response = request.send().await?;
+    let status = response.status();
+    let (etag, last_modified) = response_validators(response.headers());
+
+    if status == StatusCode::NOT_MODIFIED {
+        return Ok(FeedFetch::NotModified {
+            etag: etag.or_else(|| feed.etag.clone()),
+            last_modified: last_modified.or_else(|| feed.last_modified.clone()),
+        });
+    }
+
+    if !status.is_success() {
         return Err(eyre!(
             "Request to \"{}\" returned status code {:?}",
             feed.feed_url,
-            response.status()
+            status
         ));
     }
 
     let body = response.text().await?.trim().to_string();
-    get_feed_entries_doc(&body, &feed.author)
+    let entries = get_feed_entries_doc(&body, &feed.author)?;
+    Ok(FeedFetch::Modified {
+        entries,
+        etag,
+        last_modified,
+    })
 }
 
 pub fn get_feed_entries_doc(

@@ -102,21 +102,51 @@ pub async fn update_feeds(
 
     while let Some(task_result) = tasks.join_next().await {
         match task_result {
-            Ok((feed, Ok(entries))) => {
-                match data.apply_feed_update(&feed.category, &feed, entries) {
-                    Ok(()) => {
-                        summary.updated += 1;
-                        on_complete(&feed.title, &FeedUpdateStatus::Updated);
-                    }
-                    Err(update_error) => {
-                        summary.failed += 1;
-                        on_complete(
-                            &feed.title,
-                            &FeedUpdateStatus::Failed(update_error.to_string()),
-                        );
+            Ok((mut feed, Ok(feed_result))) => match feed_result {
+                feedparser::FeedFetch::Modified {
+                    entries,
+                    etag,
+                    last_modified,
+                } => {
+                    feed.etag = etag;
+                    feed.last_modified = last_modified;
+
+                    match data.apply_feed_update(&feed.category, &feed, entries) {
+                        Ok(()) => {
+                            summary.updated += 1;
+                            on_complete(&feed.title, &FeedUpdateStatus::Updated);
+                        }
+                        Err(update_error) => {
+                            summary.failed += 1;
+                            on_complete(
+                                &feed.title,
+                                &FeedUpdateStatus::Failed(update_error.to_string()),
+                            );
+                        }
                     }
                 }
-            }
+                feedparser::FeedFetch::NotModified {
+                    etag,
+                    last_modified,
+                } => {
+                    feed.etag = etag;
+                    feed.last_modified = last_modified;
+
+                    match data.mark_feed_checked(&feed) {
+                        Ok(()) => {
+                            summary.skipped += 1;
+                            on_complete(&feed.title, &FeedUpdateStatus::Skipped);
+                        }
+                        Err(update_error) => {
+                            summary.failed += 1;
+                            on_complete(
+                                &feed.title,
+                                &FeedUpdateStatus::Failed(update_error.to_string()),
+                            );
+                        }
+                    }
+                }
+            },
             Ok((feed, Err(fetch_error))) => {
                 summary.failed += 1;
                 on_complete(
