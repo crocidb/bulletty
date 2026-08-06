@@ -1,6 +1,6 @@
 [package]
 name = "bulletty"
-version = "0.2.2"
+version = "0.3.0"
 description = "a pretty TUI feed reader (RSS+ATOM) that stores articles locally as Markdown files"
 authors = [ "Bruno Croci <bruno@croci.me>" ]
 license = "MIT"

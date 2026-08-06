@@ -243,7 +243,7 @@ dependencies = [
 
 [[package]]
 name = "bulletty"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "ansi-to-tui",
  "astral-tl",
