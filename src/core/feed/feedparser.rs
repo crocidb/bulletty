@@ -679,7 +679,10 @@ mod tests {
             .enable_all()
             .build()
             .unwrap();
-        let entries = runtime.block_on(get_feed_entries(&client, &feed)).unwrap();
+        let entries = match runtime.block_on(get_feed_entries(&client, &feed)).unwrap() {
+            FeedFetch::Modified { entries, .. } => entries,
+            FeedFetch::NotModified { .. } => panic!("expected modified feed"),
+        };
 
         server.join().unwrap();
 

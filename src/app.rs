@@ -1,11 +1,12 @@
-use std::{cell::RefCell, collections::VecDeque, io::stdout, rc::Rc, time::Duration};
+use std::{cell::RefCell, collections::VecDeque, rc::Rc, time::Duration};
+
+#[cfg(unix)]
+use std::io::stdout;
 
 use color_eyre::{Result, eyre};
-use crossterm::{
-    cursor,
-    event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
-    execute,
-};
+use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+#[cfg(unix)]
+use crossterm::{cursor, event::KeyEventKind, execute};
 #[cfg(unix)]
 use libc;
 use ratatui::{
