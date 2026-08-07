@@ -1,6 +1,6 @@
 name: bulletty
 base: core24
-version: '0.2.2'
+version: '0.3.0'
 summary: A pretty TUI feed reader (RSS+ATOM) that stores articles locally as Markdown
 description: |
   bulletty is a terminal-based feed reader that supports both RSS and Atom feeds.
