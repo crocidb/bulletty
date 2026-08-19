@@ -236,7 +236,7 @@ impl AppScreen for MainScreen {
             )
         };
 
-        let treelist = List::new(self.feedtreestate.get_items())
+        let treelist = List::new(self.feedtreestate.get_items(self.config.hide_unread_count))
             .block(treestyle)
             .highlight_style(treeselectionstyle);
 
@@ -317,9 +317,11 @@ impl AppScreen for MainScreen {
             if !statusurl.is_empty() {
                 spans.push(Span::styled(format!(" | {statusurl}"), mutedstyle));
             }
-            spans.push(Span::styled(" | ", mutedstyle));
-            spans.push(Span::styled(format!("{unread}"), unreadstyle));
-            spans.push(Span::styled(format!("/{total}"), mutedstyle));
+            if !self.config.hide_unread_count.unwrap_or(false) {
+                spans.push(Span::styled(" | ", mutedstyle));
+                spans.push(Span::styled(format!("{unread}"), unreadstyle));
+                spans.push(Span::styled(format!("/{total}"), mutedstyle));
+            }
             Line::from(spans)
         };
 

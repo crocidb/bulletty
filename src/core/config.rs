@@ -16,6 +16,8 @@ pub struct Config {
     pub tui_auto_update: Option<bool>,
     #[serde(default)]
     pub parallel_feed_updates: Option<bool>,
+    #[serde(default)]
+    pub hide_unread_count: Option<bool>,
 }
 
 pub struct ConfigStore {
