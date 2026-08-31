@@ -23,7 +23,7 @@ use crate::core::{
 };
 use crate::ui::screens::themedialog::ThemeDialog;
 use crate::ui::screens::urldialog::UrlDialog;
-use crate::ui::tools::tuimarkdown;
+use crate::ui::tools::{styles, tuimarkdown};
 
 use super::helpdialog::HelpDialog;
 
@@ -237,6 +237,7 @@ impl AppScreen for ReaderScreen {
 
         // Content Paragraph component
         let paragraph = Paragraph::new(text)
+            .style(styles::p(Some(&theme)))
             .scroll((self.scroll as u16, 0))
             .alignment(Alignment::Left)
             .wrap(Wrap { trim: true });
