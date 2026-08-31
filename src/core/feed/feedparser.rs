@@ -1,4 +1,4 @@
-use std::{path::PathBuf, str::FromStr};
+use std::path::PathBuf;
 
 use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
 use color_eyre::eyre::{bail, eyre};
@@ -50,7 +50,12 @@ pub fn get_feed_with_data(url: &str) -> color_eyre::Result<(FeedItem, String)> {
         .user_agent(format!("bulletty/{}", env!("CARGO_PKG_VERSION")))
         .build()?;
 
-    let response = client.get(url).send()?;
+    let parsed_url = Url::parse(url)?;
+
+    let response = client
+        .get(parsed_url.clone())
+        .send()
+        .map_err(|err| eyre!("Could not request feed URL \"{url}\": {err}"))?;
 
     if !response.status().is_success() {
         return Err(eyre!(
@@ -65,8 +70,7 @@ pub fn get_feed_with_data(url: &str) -> color_eyre::Result<(FeedItem, String)> {
 
     // If the response is HTML try to follow metadata feed links
     if html::is_html(&body) {
-        let url = Url::from_str(url)?; // Fails with same error as the reqwest send() above
-        let link_parser = match html::LinkParser::new(&body, &url) {
+        let link_parser = match html::LinkParser::new(&body, &parsed_url) {
             Ok(p) => p,
             Err(html::ParseError::TooLarge) => {
                 bail!("HTML page at \"{}\" is too large to parse", url);
