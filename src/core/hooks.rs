@@ -27,16 +27,13 @@ impl AppHooks {
             return false;
         };
         let cmd = template.replace("%s", url);
-        let mut parts = cmd.split_whitespace();
-        let Some(program) = parts.next() else {
+        if cmd.trim().is_empty() {
             error!("open_link hook is empty after substitution");
             return true;
-        };
-        let args: Vec<&str> = parts.collect();
+        }
 
         info!("Running hook 'open_link': {}", cmd);
-        match Command::new(program)
-            .args(&args)
+        match Self::shell_command(&cmd)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .output()
@@ -62,9 +59,24 @@ impl AppHooks {
         true
     }
 
+    fn shell_command(cmd: &str) -> Command {
+        #[cfg(target_os = "windows")]
+        {
+            let mut c = Command::new("cmd");
+            c.arg("/C").arg(cmd);
+            c
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let mut c = Command::new("sh");
+            c.arg("-c").arg(cmd);
+            c
+        }
+    }
+
     fn run_shell_command(cmd: &str, hook_name: &str) {
         info!("Running hook '{}': {}", hook_name, cmd);
-        match Command::new("sh").arg("-c").arg(cmd).status() {
+        match Self::shell_command(cmd).status() {
             Ok(s) if s.success() => {}
             Ok(s) => error!("Hook '{}' exited with status: {}", hook_name, s),
             Err(e) => error!("Failed to execute hook '{}': {}", hook_name, e),
