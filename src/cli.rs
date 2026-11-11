@@ -124,8 +124,15 @@ fn command_add(
             println!("Feed added: {}", feed.title);
         }
         Err(err) => {
-            error!("{err}");
-            println!("{err}");
+            if err.downcast_ref::<url::ParseError>().is_some() {
+                let message =
+                    format!("Invalid feed URL \"{url}\"\nUsage: bulletty add <URL> [CATEGORY]");
+                error!("{message}");
+                println!("{message}");
+            } else {
+                error!("{err}");
+                println!("{err}");
+            }
         }
     }
 
