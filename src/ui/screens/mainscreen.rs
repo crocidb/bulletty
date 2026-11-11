@@ -242,6 +242,7 @@ impl AppScreen for MainScreen {
 
         let mut treestate = self.feedtreestate.listatate;
         frame.render_stateful_widget(treelist, chunks[0], &mut treestate);
+        self.feedtreestate.listatate = treestate;
 
         // The feed entries
         self.feedentrystate
@@ -269,6 +270,7 @@ impl AppScreen for MainScreen {
             .highlight_style(entryselectionstyle);
 
         frame.render_stateful_widget(list_widget, entrychunks[0], &mut entryliststate);
+        self.feedentrystate.listatate = entryliststate;
 
         // Feed source status line
         let (statusicon, statusname, statusslug) = match self.feedtreestate.get_selected() {

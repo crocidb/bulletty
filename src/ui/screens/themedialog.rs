@@ -90,7 +90,9 @@ impl AppScreen for ThemeDialog {
             );
 
         frame.render_widget(title, contentlayout[0]);
-        frame.render_stateful_widget(themelist, chunks[0], &mut self.state.state.clone());
+        let mut themeliststate = self.state.state;
+        frame.render_stateful_widget(themelist, chunks[0], &mut themeliststate);
+        self.state.state = themeliststate;
 
         // Scrollbar
         let mut scrollbarstate =
