@@ -19,6 +19,8 @@ use crate::core::{
     library::feeditem::FeedItem,
 };
 
+const FALLBACK_TITLE_LEN: usize = 50;
+
 #[derive(Debug)]
 pub enum FeedFetch {
     Modified {
@@ -93,7 +95,8 @@ pub fn get_feed(url: &str) -> color_eyre::Result<FeedItem> {
 }
 
 fn extract_title(node: &Node) -> String {
-    node.descendants()
+    let title = node
+        .descendants()
         .find(|t| t.tag_name().name() == "title")
         .and_then(|t| {
             let text = t.text()?;
@@ -104,7 +107,14 @@ fn extract_title(node: &Node) -> String {
             }
         })
         .map(|s| feedutils::normalize_and_truncate(s, 256))
-        .unwrap_or_default()
+        .unwrap_or_default();
+
+    if !title.is_empty() {
+        return title;
+    }
+
+    let (description, _) = get_description_content(node);
+    feedutils::normalize_and_truncate(&description, FALLBACK_TITLE_LEN)
 }
 
 fn parse(doc: &str, feed_url: &str) -> color_eyre::Result<FeedItem> {
@@ -590,6 +600,41 @@ mod tests {
     }
 
     #[test]
+    fn rss_missing_channel_title_falls_back_to_description() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <description>Public posts from @selfcare@hachyderm.io</description>
+    <link>https://example.com/</link>
+    <item>
+      <link>https://example.com/item1</link>
+    </item>
+  </channel>
+</rss>"#;
+
+        let feed = parse(xml, "NOURL").expect("failed to parse RSS without channel title");
+        assert_eq!(feed.title, "Public posts from @selfcare@hachyderm.io");
+        assert_eq!(feed.slug, "public-posts-from-selfcare-hachyderm-io");
+    }
+
+    #[test]
+    fn rss_channel_without_title_uses_first_item_title() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <description>Public posts from @selfcare@hachyderm.io</description>
+    <item>
+      <title>Item 1</title>
+      <link>https://example.com/item1</link>
+    </item>
+  </channel>
+</rss>"#;
+
+        let feed = parse(xml, "NOURL").expect("failed to parse RSS without channel title");
+        assert_eq!(feed.title, "Item 1");
+    }
+
+    #[test]
     fn get_feed_entries_doc_parses_rss_items_variants() {
         let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
  <rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:dc="http://purl.org/dc/elements/1.1/">
@@ -904,6 +949,46 @@ mod tests {
         assert_eq!(entry.url, "https://www.youtube.com/watch?v=VIDEOID");
         assert_eq!(entry.author, "Some Youtube Author");
         assert_eq!(entry.description, "This is a description!");
+    }
+
+    #[test]
+    fn get_feed_entries_doc_items_without_title_fall_back_to_content() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>selfcare.tech</title>
+    <description>Public posts from @selfcare@hachyderm.io</description>
+    <link>https://hachyderm.io/@selfcare</link>
+    <item>
+      <guid isPermaLink="true">https://hachyderm.io/@selfcare/117599956651508705</guid>
+      <link>https://hachyderm.io/@selfcare/117599956651508705</link>
+      <pubDate>Wed, 11 Nov 2026 21:35:32 +0000</pubDate>
+      <description>&lt;p&gt;Take a break before you need it. It will make it easier to prevent burnout.&lt;/p&gt;</description>
+    </item>
+    <item>
+      <guid isPermaLink="true">https://hachyderm.io/@selfcare/117599248775766969</guid>
+      <link>https://hachyderm.io/@selfcare/117599248775766969</link>
+      <pubDate>Wed, 11 Nov 2026 18:35:30 +0000</pubDate>
+      <description>&lt;p&gt;Breathe deeply.&lt;/p&gt;</description>
+    </item>
+  </channel>
+</rss>"#;
+
+        let entries = get_feed_entries_doc(xml, "selfcare.tech")
+            .expect("failed to parse Mastodon-style RSS entries");
+        assert_eq!(entries.len(), 2);
+
+        assert_eq!(
+            entries[0].title,
+            feedutils::normalize_and_truncate(
+                "Take a break before you need it. It will make it easier to prevent burnout.",
+                FALLBACK_TITLE_LEN
+            )
+        );
+        assert_eq!(entries[0].title.len(), FALLBACK_TITLE_LEN);
+        assert!(entries[0].title.ends_with("..."));
+        assert_eq!(entries[1].title, "Breathe deeply.");
+        assert_ne!(entries[0].title, entries[1].title);
     }
 
     #[test]
