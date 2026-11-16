@@ -196,7 +196,10 @@ impl LibraryData {
             let item_slug = {
                 let base_path = entrypath.to_string_lossy();
                 let max_slug_len = 250usize.saturating_sub(base_path.len() + 1);
-                let slug = slugify(&e.title);
+                let mut slug = slugify(&e.title);
+                if slug.is_empty() {
+                    slug = "untitled".to_string();
+                }
                 let slug_cut = &slug[..slug.len().min(max_slug_len)];
                 slug_cut.to_string()
             };
@@ -209,20 +212,16 @@ impl LibraryData {
 
     fn update_entries(&self, feed: &FeedItem, entries: Vec<FeedEntry>) -> color_eyre::Result<()> {
         for entry in entries.iter().as_ref() {
-            // if it exists, it means the entry has been setup already
-            if !entry.filepath.exists() {
+            // None means the entry has been setup already
+            if let Some(filepath) = self.free_entry_path(&entry.filepath, &entry.url) {
                 let mut file = match OpenOptions::new()
                     .write(true)
                     .create_new(true)
-                    .open(&entry.filepath)
+                    .open(&filepath)
                 {
                     Ok(file) => file,
                     Err(error) => {
-                        error!(
-                            "Error creating file '{}': {}",
-                            entry.filepath.display(),
-                            error
-                        );
+                        error!("Error creating file '{}': {}", filepath.display(), error);
 
                         break;
                     }
@@ -335,6 +334,28 @@ impl LibraryData {
         }
 
         Ok(unread)
+    }
+
+    /// Path to save an entry with this URL at: PATH, or PATH with "-2", "-3"... when other
+    /// posts with the same title are saved there already. None when the entry itself is.
+    fn free_entry_path(&self, path: &Path, url: &str) -> Option<PathBuf> {
+        let stem = path.file_stem()?.to_string_lossy().into_owned();
+        let dir = path.parent()?;
+        for n in 1.. {
+            let candidate = if n == 1 {
+                path.to_path_buf()
+            } else {
+                dir.join(format!("{stem}-{n}.md"))
+            };
+            let Ok(contents) = std::fs::read_to_string(&candidate) else {
+                return Some(candidate);
+            };
+            match self.parse_feed_entry(&contents, &candidate) {
+                Ok(saved) if saved.url != url => continue,
+                _ => return None,
+            }
+        }
+        None
     }
 
     fn parse_feed_entry(&self, contents: &str, path: &Path) -> color_eyre::Result<FeedEntry> {
@@ -513,6 +534,44 @@ pub fn load_or_create(path: &Path) {
 mod tests {
     use super::*;
     use std::path::PathBuf;
+
+    #[test]
+    fn test_posts_with_the_same_title_are_all_saved() {
+        let (ld, _temp) = LibraryData::new_for_test();
+        let feed = FeedItem {
+            slug: "weekly".to_string(),
+            ..Default::default()
+        };
+        std::fs::create_dir_all(
+            ld.path
+                .join(DATA_CATEGORIES_DIR)
+                .join("General")
+                .join("weekly"),
+        )
+        .unwrap();
+        let entry = |url: &str| FeedEntry {
+            title: "Weekly links".to_string(),
+            url: url.to_string(),
+            ..Default::default()
+        };
+        let entries = || vec![entry("https://ex.com/0"), entry("https://ex.com/1")];
+
+        ld.apply_feed_update("General", &feed, entries()).unwrap();
+        ld.apply_feed_update("General", &feed, entries()).unwrap();
+
+        let dir = ld
+            .path
+            .join(DATA_CATEGORIES_DIR)
+            .join("General")
+            .join("weekly");
+        let mut names: Vec<String> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|n| n.ends_with(".md"))
+            .collect();
+        names.sort();
+        assert_eq!(names, vec!["weekly-links-2.md", "weekly-links.md"]);
+    }
 
     #[test]
     fn test_parse_feed_entry_plus_delimiter() {
