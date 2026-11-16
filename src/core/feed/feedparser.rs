@@ -258,10 +258,11 @@ pub fn get_feed_entries_doc(
             defaultauthor.to_string()
         };
 
-        // url extraction
-        let entryurl = entry
-            .descendants()
-            .find(|t| {
+        // url extraction. Atom entries can list other links first (Blogger puts the
+        // comments feed before the post), so prefer a link that is rel="alternate" or
+        // has no rel, and fall back to any link.
+        let find_url = |any_link: bool| {
+            entry.descendants().find(|t| {
                 if t.tag_name().name() == "id"
                     && let Some(text) = t.text()
                     && let Ok(url) = Url::parse(text)
@@ -279,7 +280,11 @@ pub fn get_feed_entries_doc(
                 }
 
                 t.tag_name().name() == "link"
+                    && (any_link || t.attribute("rel").is_none_or(|rel| rel == "alternate"))
             })
+        };
+        let entryurl = find_url(false)
+            .or_else(|| find_url(true))
             .and_then(|t| {
                 if t.text().is_none() {
                     if t.attribute("url").is_some() {
@@ -812,6 +817,29 @@ mod tests {
             .unwrap()
             .with_timezone(&Utc);
         assert_eq!(e3.date, expected_e3_date);
+    }
+
+    #[test]
+    fn get_feed_entries_doc_prefers_alternate_link() {
+        // Blogger lists the comments feed and edit/self links before the post
+        let xml = r#"<?xml version="1.0" encoding="utf-8"?>
+ <feed xmlns="http://www.w3.org/2005/Atom">
+   <title>Blog</title>
+   <entry>
+     <id>tag:blogger.com,1999:blog-1.post-1</id>
+     <title>Hello world</title>
+     <content>Post</content>
+     <link rel="replies" type="application/atom+xml" href="https://myblog.blogspot.com/feeds/1/comments/default"/>
+     <link rel="edit" type="application/atom+xml" href="https://www.blogger.com/feeds/1/posts/default/1"/>
+     <link rel="alternate" type="text/html" href="https://myblog.blogspot.com/2026/11/hello-world.html"/>
+   </entry>
+ </feed>"#;
+
+        let entries = get_feed_entries_doc(xml, "Bob").expect("failed to parse Atom entries");
+        assert_eq!(
+            entries[0].url,
+            "https://myblog.blogspot.com/2026/11/hello-world.html"
+        );
     }
 
     #[test]
