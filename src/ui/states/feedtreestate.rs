@@ -87,7 +87,7 @@ impl FeedTreeState {
         }
     }
 
-    pub fn get_items(&self) -> Vec<ListItem<'_>> {
+    pub fn get_items(&self, hide_unread_count: Option<bool>) -> Vec<ListItem<'_>> {
         self.treeitems
             .iter()
             .map(|item| match item {
@@ -98,7 +98,7 @@ impl FeedTreeState {
                         .get(&(c.clone(), s.clone()))
                         .copied()
                         .unwrap_or(0);
-                    if unread > 0 {
+                    if unread > 0 && !hide_unread_count.unwrap_or(false) {
                         ListItem::new(Line::from(Span::styled(
                             format!(" \u{f09e}  ({unread}) {t}"),
                             Style::default().fg(Color::from_u32(self.theme.base[9])),
@@ -239,7 +239,7 @@ mod tests {
         let backend = TestBackend::new(30, 3);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal
-            .draw(|f| f.render_widget(List::new(state.get_items()), f.area()))
+            .draw(|f| f.render_widget(List::new(state.get_items(Some(false))), f.area()))
             .unwrap();
 
         let buffer = terminal.backend().buffer();
@@ -249,8 +249,8 @@ mod tests {
         assert!(row_text(buffer, 2, 30).contains(" Read Feed"));
         assert!(!row_text(buffer, 2, 30).contains("(0)"));
 
-        // feeds with unread articles are bold and colored with the theme's
-        // unread color (base09)
+        // feeds with unread articles are colored with the theme's unread color
+        // (base09)
         let unread_cell = &buffer[(4, 1)];
         assert_eq!(unread_cell.fg, Color::from_u32(0xff0000));
 
@@ -258,6 +258,31 @@ mod tests {
         let read_cell = &buffer[(4, 2)];
         assert_eq!(read_cell.fg, Color::Reset);
         assert!(!read_cell.modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn test_hidden_unread_feed_count_has_default_style() {
+        let mut state = FeedTreeState::new();
+        state.theme.base[9] = 0xffffff;
+        state.treeitems = vec![FeedItemInfo::Item(
+            "Unread Feed".into(),
+            "Tech".into(),
+            "unread".into(),
+        )];
+        state
+            .unread_counts
+            .insert(("Tech".into(), "unread".into()), 12);
+
+        let backend = TestBackend::new(30, 1);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| f.render_widget(List::new(state.get_items(Some(true))), f.area()))
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        assert!(row_text(buffer, 0, 30).contains(" Unread Feed"));
+        assert!(!row_text(buffer, 0, 30).contains("(12)"));
+        assert_eq!(buffer[(4, 0)].fg, Color::Reset);
     }
 
     #[test]
@@ -269,7 +294,7 @@ mod tests {
         let backend = TestBackend::new(30, 1);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal
-            .draw(|f| f.render_widget(List::new(state.get_items()), f.area()))
+            .draw(|f| f.render_widget(List::new(state.get_items(None)), f.area()))
             .unwrap();
 
         assert!(row_text(terminal.backend().buffer(), 0, 30).contains("(5) Read Later"));
