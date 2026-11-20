@@ -12,6 +12,7 @@ const SENTINEL_SYMBOL: &str = "\0";
 pub struct Hyperlink<'a> {
     text: Text<'a>,
     url: String,
+    id: Option<String>,
     style: Style,
     alignment: Alignment,
     wrap: Option<Wrap>,
@@ -22,10 +23,17 @@ impl<'a> Hyperlink<'a> {
         Self {
             text: text.into(),
             url: url.into(),
+            id: None,
             style: Style::default(),
             alignment: Alignment::Left,
             wrap: None,
         }
+    }
+
+    #[must_use]
+    pub fn id(mut self, id: impl Into<String>) -> Self {
+        self.id = Some(id.into());
+        self
     }
 
     #[must_use]
@@ -49,6 +57,12 @@ impl<'a> Hyperlink<'a> {
 
 fn sanitize_url(url: &str) -> String {
     url.chars().filter(|c| !c.is_control()).collect()
+}
+
+fn sanitize_id(id: &str) -> String {
+    id.chars()
+        .filter(|c| !c.is_control() && *c != ':' && *c != ';')
+        .collect()
 }
 
 fn link_id(url: &str, area: Rect) -> String {
@@ -103,7 +117,11 @@ impl Widget for &Hyperlink<'_> {
         let id = if sanitized_url.is_empty() {
             String::new()
         } else {
-            link_id(&sanitized_url, area)
+            self.id
+                .as_deref()
+                .map(sanitize_id)
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| link_id(&sanitized_url, area))
         };
 
         for y in area.top()..area.bottom() {
@@ -335,5 +353,21 @@ mod tests {
         let cleared = Buffer::empty(area);
         let clear_diff = prev.diff(&cleared);
         assert_eq!(clear_diff.len(), 10);
+    }
+
+    #[test]
+    fn explicit_id_is_used_and_sanitized() {
+        let area = Rect::new(0, 0, 5, 1);
+        let mut buf = Buffer::empty(area);
+        let url = "https://example.com";
+
+        Hyperlink::new("a", url)
+            .id("grp:1;bad\x1b")
+            .render(area, &mut buf);
+
+        assert_eq!(
+            buf[(0, 0)].symbol(),
+            format!("\x1b]8;id=grp1bad;{url}\x1b\\a\x1b]8;;\x1b\\")
+        );
     }
 }

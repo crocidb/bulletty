@@ -8,7 +8,6 @@ use ratatui::widgets::{
     Block, Padding, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
 };
 use tracing::error;
-use unicode_width::UnicodeWidthStr;
 
 use crate::app::AppWorkStatus;
 use crate::core::ui::notification::{AppNotification, NotificationPriority};
@@ -211,39 +210,18 @@ impl AppScreen for ReaderScreen {
         frame.render_widget(url, contentlayout[2]);
 
         // Content
-        let text = tuimarkdown::from_str(
+        let markdown = tuimarkdown::parse(
             &current_entry.text,
             Some(theme.clone()),
             contentlayout[3].width,
         );
-
-        let textheight = text.height();
-
-        // This is a workaround to get more or less the amount of wrapped lines, to be used on the
-        // scrollbar
-        let mut wrapped_lines = 0;
-        for line in text.lines.iter() {
-            let content: String = line
-                .spans
-                .iter()
-                .map(|span| span.content.to_string())
-                .collect();
-            let line_width = UnicodeWidthStr::width(content.as_str());
-            let wrapped = line_width.div_ceil(contentlayout[3].width as usize);
-            wrapped_lines += wrapped - wrapped.min(1);
-        }
-
-        let scrollheight = textheight + (wrapped_lines as f32 * 1.06) as usize + 4;
-        self.scrollmax = scrollheight - (contentlayout[3].height as usize).min(scrollheight);
+        let wrapped = markdown.wrap(contentlayout[3].width);
+        let scrollheight = wrapped.line_count();
         self.viewport_height = contentlayout[3].height as usize;
+        self.scrollmax = scrollheight.saturating_sub(self.viewport_height);
+        self.scroll = self.scroll.min(self.scrollmax);
 
-        // Content Paragraph component
-        let paragraph = Paragraph::new(text)
-            .scroll((self.scroll as u16, 0))
-            .alignment(Alignment::Left)
-            .wrap(Wrap { trim: true });
-
-        frame.render_widget(paragraph, contentlayout[3]);
+        frame.render_widget(wrapped.scroll(self.scroll as u16), contentlayout[3]);
 
         // Scrollbar
         let mut scrollbarstate = ScrollbarState::new(self.scrollmax).position(self.scroll);
@@ -431,10 +409,11 @@ mod tests {
 
         let (library, _temp_dir) = FeedLibrary::new_for_test();
         let url = "https://example.com/article";
+        let body_url = "https://ratatui.rs";
         let entries = vec![FeedEntry {
             title: "Test Entry".to_string(),
             url: url.to_string(),
-            text: "Hello world".to_string(),
+            text: format!("Read [Ratatui]({body_url}) today"),
             ..Default::default()
         }];
         let mut reader_screen = ReaderScreen::new(
@@ -466,5 +445,19 @@ mod tests {
             .count();
 
         assert_eq!(linked_cells, url.len());
+
+        let expected_body_osc = format!(";{body_url}\x1b\\");
+        let body_linked_cells: usize = buf
+            .content()
+            .iter()
+            .filter(|cell| {
+                cell.symbol().starts_with("\x1b]8;id=")
+                    && cell.symbol().contains(&expected_body_osc)
+                    && cell.symbol().ends_with("\x1b]8;;\x1b\\")
+            })
+            .count();
+
+        // Both "Ratatui" and "https://ratatui.rs" are linked.
+        assert_eq!(body_linked_cells, "Ratatui".len() + body_url.len());
     }
 }

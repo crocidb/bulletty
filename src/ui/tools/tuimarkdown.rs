@@ -2,6 +2,8 @@
 //! Originally written by joshka
 //! https://github.com/joshka/tui-markdown
 
+use std::collections::VecDeque;
+use std::mem;
 use std::sync::LazyLock;
 use std::vec;
 
@@ -10,8 +12,11 @@ use itertools::Itertools;
 use pulldown_cmark::{
     BlockQuoteKind, CodeBlockKind, CowStr, Event, HeadingLevel, Options, Parser, Tag, TagEnd,
 };
+use ratatui::buffer::{Buffer, CellWidth};
+use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
-use ratatui::text::{Line, Span, Text};
+use ratatui::text::{Line, Span, StyledGrapheme, Text};
+use ratatui::widgets::Widget;
 use syntect::{
     easy::HighlightLines,
     highlighting::ThemeSet,
@@ -23,8 +28,302 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::core::library::settings::theme::Theme;
 use crate::ui::tools::styles;
+use crate::ui::widgets::hyperlink::Hyperlink;
 
-pub fn from_str(input: &str, theme: Option<Theme>, max_width: u16) -> Text<'_> {
+/// An OSC 8 link target attached to a markdown span.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LinkTarget {
+    pub url: String,
+    pub id: String,
+}
+
+/// A parsed markdown document holding both the styled Ratatui [`Text`] and
+/// per-span hyperlink metadata so links can be rendered via [`Hyperlink`].
+#[derive(Debug, Clone)]
+pub struct MarkdownDocument<'a> {
+    pub text: Text<'a>,
+    line_links: Vec<Vec<Option<LinkTarget>>>,
+}
+
+#[derive(Debug, Clone)]
+struct LinkedGrapheme<'a> {
+    grapheme: StyledGrapheme<'a>,
+    link: Option<&'a LinkTarget>,
+}
+
+/// A word-wrapped markdown document ready to be rendered as a scrollable
+/// Ratatui [`Widget`] with clickable OSC 8 [`Hyperlink`] spans.
+#[derive(Debug, Clone)]
+pub struct WrappedMarkdown<'a> {
+    lines: Vec<Vec<LinkedGrapheme<'a>>>,
+    scroll: u16,
+}
+
+impl<'a> MarkdownDocument<'a> {
+    /// Word-wraps the document to `max_width` columns (matching Ratatui's
+    /// `Wrap { trim: true }` behavior) while preserving per-grapheme link metadata.
+    pub fn wrap(&self, max_width: u16) -> WrappedMarkdown<'_> {
+        if max_width == 0 {
+            return WrappedMarkdown {
+                lines: Vec::new(),
+                scroll: 0,
+            };
+        }
+
+        let mut lines = Vec::new();
+        for (line, links) in self.text.lines.iter().zip(&self.line_links) {
+            let line_style = self.text.style.patch(line.style);
+            let graphemes = line.spans.iter().zip(links).flat_map(move |(span, link)| {
+                let link_ref = link.as_ref();
+                span.styled_graphemes(line_style)
+                    .map(move |grapheme| LinkedGrapheme {
+                        grapheme,
+                        link: link_ref,
+                    })
+            });
+            wrap_linked_line(graphemes, max_width, true, &mut lines);
+        }
+
+        WrappedMarkdown { lines, scroll: 0 }
+    }
+}
+
+impl WrappedMarkdown<'_> {
+    /// Returns the exact number of wrapped visual lines.
+    pub fn line_count(&self) -> usize {
+        self.lines.len()
+    }
+
+    /// Sets the vertical scroll offset in visual lines.
+    #[must_use]
+    pub const fn scroll(mut self, offset: u16) -> Self {
+        self.scroll = offset;
+        self
+    }
+}
+
+impl Widget for WrappedMarkdown<'_> {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        Widget::render(&self, area, buf);
+    }
+}
+
+impl Widget for &WrappedMarkdown<'_> {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        let area = area.intersection(buf.area);
+        if area.is_empty() {
+            return;
+        }
+
+        for (row, line) in self
+            .lines
+            .iter()
+            .skip(self.scroll as usize)
+            .take(area.height as usize)
+            .enumerate()
+        {
+            render_wrapped_line(line, area, buf, area.top() + row as u16);
+        }
+    }
+}
+
+fn wrap_linked_line<'a>(
+    line_symbols: impl IntoIterator<Item = LinkedGrapheme<'a>>,
+    max_line_width: u16,
+    trim: bool,
+    output: &mut Vec<Vec<LinkedGrapheme<'a>>>,
+) {
+    let mut wrapped_lines: VecDeque<Vec<LinkedGrapheme<'a>>> = VecDeque::new();
+    let mut pending_line: Vec<LinkedGrapheme<'a>> = Vec::new();
+    let mut pending_word: Vec<LinkedGrapheme<'a>> = Vec::new();
+    let mut pending_whitespace: VecDeque<LinkedGrapheme<'a>> = VecDeque::new();
+    let mut line_width: u16 = 0;
+    let mut word_width: u16 = 0;
+    let mut whitespace_width: u16 = 0;
+    let mut non_whitespace_previous = false;
+
+    for item in line_symbols {
+        let is_whitespace = item.grapheme.is_whitespace();
+        let symbol_width = item.grapheme.symbol.cell_width();
+
+        if symbol_width > max_line_width {
+            continue;
+        }
+
+        let word_found = non_whitespace_previous && is_whitespace;
+        let trimmed_overflow =
+            pending_line.is_empty() && trim && word_width + symbol_width > max_line_width;
+        let whitespace_overflow =
+            pending_line.is_empty() && trim && whitespace_width + symbol_width > max_line_width;
+        let untrimmed_overflow = pending_line.is_empty()
+            && !trim
+            && word_width + whitespace_width + symbol_width > max_line_width;
+
+        if word_found || trimmed_overflow || whitespace_overflow || untrimmed_overflow {
+            if !pending_line.is_empty() || !trim {
+                pending_line.extend(pending_whitespace.drain(..));
+                line_width += whitespace_width;
+            }
+
+            pending_line.append(&mut pending_word);
+            line_width += word_width;
+
+            pending_whitespace.clear();
+            whitespace_width = 0;
+            word_width = 0;
+        }
+
+        let line_full = line_width >= max_line_width;
+        let pending_word_overflow = symbol_width > 0
+            && line_width + whitespace_width + word_width + symbol_width > max_line_width;
+
+        if line_full || pending_word_overflow {
+            let mut remaining_width = max_line_width.saturating_sub(line_width);
+
+            wrapped_lines.push_back(mem::take(&mut pending_line));
+            line_width = 0;
+
+            while let Some(ws) = pending_whitespace.front() {
+                let width = ws.grapheme.symbol.cell_width();
+                if width > remaining_width {
+                    break;
+                }
+                whitespace_width -= width;
+                remaining_width -= width;
+                pending_whitespace.pop_front();
+            }
+
+            if is_whitespace && pending_whitespace.is_empty() {
+                continue;
+            }
+        }
+
+        if is_whitespace {
+            whitespace_width += symbol_width;
+            pending_whitespace.push_back(item);
+        } else {
+            word_width += symbol_width;
+            pending_word.push(item);
+        }
+
+        non_whitespace_previous = !is_whitespace;
+    }
+
+    if pending_line.is_empty() && pending_word.is_empty() && !pending_whitespace.is_empty() && trim
+    {
+        wrapped_lines.push_back(Vec::new());
+    }
+    if !pending_line.is_empty() || !trim {
+        pending_line.extend(pending_whitespace.drain(..));
+    }
+    pending_line.append(&mut pending_word);
+
+    if !pending_line.is_empty() {
+        wrapped_lines.push_back(pending_line);
+    }
+    if wrapped_lines.is_empty() {
+        wrapped_lines.push_back(Vec::new());
+    }
+
+    output.extend(wrapped_lines);
+}
+
+fn render_wrapped_line(line: &[LinkedGrapheme<'_>], area: Rect, buf: &mut Buffer, y: u16) {
+    let mut x = area.left();
+    let mut i = 0;
+
+    while i < line.len() && x < area.right() {
+        if let Some(target) = line[i].link {
+            // Collect all consecutive graphemes belonging to the same link target
+            // and render them together with the Hyperlink widget.
+            let mut spans: Vec<Span<'_>> = Vec::new();
+            let mut current_style: Option<Style> = None;
+            let mut current_text = String::new();
+            let mut run_width: u16 = 0;
+
+            while i < line.len() && line[i].link == Some(target) {
+                let sym = line[i].grapheme.symbol;
+                let width = sym.cell_width();
+                if width == 0 {
+                    i += 1;
+                    continue;
+                }
+                if x.saturating_add(run_width).saturating_add(width) > area.right() {
+                    break;
+                }
+
+                let style = line[i].grapheme.style;
+                if current_style != Some(style) {
+                    if !current_text.is_empty() {
+                        spans.push(Span::styled(
+                            mem::take(&mut current_text),
+                            current_style.unwrap_or_default(),
+                        ));
+                    }
+                    current_style = Some(style);
+                }
+
+                if sym.is_empty() {
+                    current_text.push(' ');
+                } else {
+                    current_text.push_str(sym);
+                }
+                run_width = run_width.saturating_add(width);
+                i += 1;
+            }
+
+            if !current_text.is_empty() {
+                spans.push(Span::styled(
+                    current_text,
+                    current_style.unwrap_or_default(),
+                ));
+            }
+
+            if run_width > 0 {
+                let link_area = Rect::new(x, y, run_width, 1);
+                Hyperlink::new(Text::from(Line::from(spans)), target.url.as_str())
+                    .id(target.id.as_str())
+                    .render(link_area, buf);
+                x = x.saturating_add(run_width);
+            } else {
+                // Remaining link grapheme didn't fit on this row.
+                break;
+            }
+        } else {
+            let sym = line[i].grapheme.symbol;
+            let width = sym.cell_width();
+            if width > 0 {
+                if x.saturating_add(width) > area.right() {
+                    break;
+                }
+                let display = if sym.is_empty() { " " } else { sym };
+                buf[(x, y)]
+                    .set_symbol(display)
+                    .set_style(line[i].grapheme.style);
+                x = x.saturating_add(width);
+            }
+            i += 1;
+        }
+    }
+}
+
+fn make_link_id(seq: usize, url: &str) -> String {
+    let mut hash: u64 = 0xcbf29ce484222325;
+    let prime: u64 = 0x100000001b3;
+
+    for byte in (seq as u64)
+        .to_le_bytes()
+        .into_iter()
+        .chain(url.as_bytes().iter().copied())
+    {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(prime);
+    }
+
+    format!("{hash:016x}")
+}
+
+pub fn parse(input: &str, theme: Option<Theme>, max_width: u16) -> MarkdownDocument<'_> {
     let mut options = Options::empty();
     options.insert(Options::ENABLE_STRIKETHROUGH);
     options.insert(Options::ENABLE_TASKLISTS);
@@ -35,7 +334,14 @@ pub fn from_str(input: &str, theme: Option<Theme>, max_width: u16) -> Text<'_> {
     let parser = Parser::new_ext(input, options);
     let mut writer = TextWriter::new(parser, theme, max_width);
     writer.run();
-    writer.text
+    MarkdownDocument {
+        text: writer.text,
+        line_links: writer.line_links,
+    }
+}
+
+pub fn from_str(input: &str, theme: Option<Theme>, max_width: u16) -> Text<'_> {
+    parse(input, theme, max_width).text
 }
 
 // Heading attributes collected from pulldown-cmark to render after the heading text.
@@ -112,7 +418,13 @@ struct TextWriter<'a, I> {
     list_indices: Vec<Option<u64>>,
 
     /// A link which will be appended to the current line when the link tag is closed.
-    link: Option<CowStr<'a>>,
+    link: Option<LinkTarget>,
+
+    /// Monotonic counter used to assign distinct deterministic OSC 8 ids per link run.
+    next_link_seq: usize,
+
+    /// Parallel to `text.lines[i].spans[j]`: optional hyperlink target for each span.
+    line_links: Vec<Vec<Option<LinkTarget>>>,
 
     /// The current image to be closed
     image: Option<CowStr<'a>>,
@@ -180,6 +492,8 @@ where
             code_highlighter: None,
             code_syntax_set: None,
             link: None,
+            next_link_seq: 0,
+            line_links: vec![],
             image: None,
             heading_meta: None,
             in_metadata_block: false,
@@ -483,6 +797,9 @@ where
                 }
             }
             line.spans.insert(1, marker_span);
+            if let Some(links) = self.line_links.last_mut() {
+                links.insert(1, None);
+            }
         } else {
             self.push_span(marker_span);
         }
@@ -561,7 +878,9 @@ where
         for line in lines {
             let wrapped = wrap_code_line(line, inner_width, bg, code_style);
             for wline in wrapped {
+                let span_count = wline.spans.len();
                 self.text.lines.push(wline);
+                self.line_links.push(vec![None; span_count]);
             }
         }
 
@@ -642,31 +961,53 @@ where
         for prefix in line_prefixes.iter().rev().cloned() {
             line.spans.insert(0, prefix);
         }
+        let span_count = line.spans.len();
         self.text.lines.push(line);
+        self.line_links.push(vec![None; span_count]);
     }
 
     #[instrument(level = "trace", skip(self))]
     fn push_span(&mut self, span: Span<'a>) {
+        let link = self.link.clone();
+        self.push_span_with_link(span, link);
+    }
+
+    fn push_span_with_link(&mut self, span: Span<'a>, link: Option<LinkTarget>) {
         if let Some(line) = self.text.lines.last_mut() {
             line.push_span(span);
+            self.line_links.last_mut().unwrap().push(link);
         } else {
             self.push_line(Line::from(vec![span]));
+            if let Some(links) = self.line_links.last_mut()
+                && let Some(last) = links.last_mut()
+            {
+                *last = link;
+            }
         }
     }
 
     /// Store the link to be appended to the link text
     #[instrument(level = "trace", skip(self))]
     fn push_link(&mut self, dest_url: CowStr<'a>) {
-        self.link = Some(dest_url);
+        let url = dest_url.into_string();
+        let id = make_link_id(self.next_link_seq, &url);
+        self.next_link_seq += 1;
+        self.link = Some(LinkTarget { url, id });
+        self.push_inline_style(styles::link(self.theme.as_ref()));
     }
 
     /// Append the link to the current line
     #[instrument(level = "trace", skip(self))]
     fn pop_link(&mut self) {
         if let Some(link) = self.link.take() {
-            self.push_span(" (".into());
-            self.push_span(Span::styled(link, styles::link(self.theme.as_ref())));
-            self.push_span(")".into());
+            self.pop_inline_style();
+            let url = link.url.clone();
+            self.push_span_with_link(" (".into(), None);
+            self.push_span_with_link(
+                Span::styled(url, styles::link(self.theme.as_ref())),
+                Some(link),
+            );
+            self.push_span_with_link(")".into(), None);
         }
     }
 
@@ -686,9 +1027,18 @@ where
     #[instrument(level = "trace", skip(self))]
     fn pop_image(&mut self) {
         if let Some(image_link) = self.image.take() {
-            self.push_span("  -> ".into());
-            self.push_span(Span::styled(image_link, styles::link(self.theme.as_ref())));
-            self.push_span("]".into());
+            let url = image_link.to_string();
+            let url_target = LinkTarget {
+                id: make_link_id(self.next_link_seq, &url),
+                url,
+            };
+            self.next_link_seq += 1;
+            self.push_span_with_link("  -> ".into(), None);
+            self.push_span_with_link(
+                Span::styled(image_link, styles::link(self.theme.as_ref())),
+                Some(url_target),
+            );
+            self.push_span_with_link("]".into(), None);
         }
     }
 }
@@ -1232,11 +1582,9 @@ mod tests {
             from_str("[Link](https://example.com)", None, 80),
             Text::from(
                 Line::from_iter([
-                    Span::from("Link"),
+                    Span::styled("Link", styles::link(None)),
                     Span::from(" ("),
-                    Span::from("https://example.com")
-                        .style(styles::p(None))
-                        .underlined(),
+                    Span::styled("https://example.com", styles::link(None)),
                     Span::from(")")
                 ])
                 .style(styles::p(None))
@@ -1254,11 +1602,127 @@ mod tests {
                     Span::from("[Image: "),
                     Span::from("TestImage"),
                     Span::from("  -> "),
-                    Span::from("/test.html").style(styles::p(None)).underlined(),
+                    Span::styled("/test.html", styles::link(None)),
                     Span::from("]"),
                 ])
                 .style(styles::p(None)),
             ])
         );
+    }
+
+    #[rstest]
+    fn renders_markdown_link_text_and_url_as_osc8(_with_tracing: DefaultGuard) {
+        let url = "https://example.com";
+        let md = format!("See [Click **me**]({url}) now");
+        let doc = parse(&md, None, 80);
+        let wrapped = doc.wrap(80);
+        let area = Rect::new(0, 0, 80, 2);
+        let mut buf = Buffer::empty(area);
+        wrapped.render(area, &mut buf);
+
+        // "See " (cols 0..4) should be plain text.
+        for (x, ch) in "See ".chars().enumerate() {
+            assert_eq!(buf[(x as u16, 0)].symbol(), ch.to_string());
+        }
+
+        // "Click me" (cols 4..12) should be OSC 8 linked with one shared id,
+        // styled with link style and preserving BOLD on "me".
+        let link_id = buf[(4, 0)]
+            .symbol()
+            .strip_prefix("\x1b]8;id=")
+            .and_then(|s| s.split(';').next())
+            .expect("link text should have OSC 8 id")
+            .to_string();
+        let expected_link_fg = styles::link(None).fg.unwrap();
+        for (i, ch) in "Click me".chars().enumerate() {
+            let cell = &buf[(4 + i as u16, 0)];
+            assert_eq!(
+                cell.symbol(),
+                format!("\x1b]8;id={link_id};{url}\x1b\\{ch}\x1b]8;;\x1b\\")
+            );
+            assert_eq!(cell.fg, expected_link_fg);
+            assert!(!cell.modifier.contains(ratatui::style::Modifier::UNDERLINED));
+        }
+        assert!(
+            buf[(10, 0)]
+                .modifier
+                .contains(ratatui::style::Modifier::BOLD)
+        );
+
+        // " (" (cols 12..14) is plain punctuation.
+        assert_eq!(buf[(12, 0)].symbol(), " ");
+        assert_eq!(buf[(13, 0)].symbol(), "(");
+
+        // URL (cols 14..14+url.len()) should share the same OSC 8 id and link style.
+        for (i, ch) in url.chars().enumerate() {
+            let cell = &buf[(14 + i as u16, 0)];
+            assert_eq!(
+                cell.symbol(),
+                format!("\x1b]8;id={link_id};{url}\x1b\\{ch}\x1b]8;;\x1b\\")
+            );
+            assert_eq!(cell.fg, expected_link_fg);
+            assert!(!cell.modifier.contains(ratatui::style::Modifier::UNDERLINED));
+        }
+
+        // ") now" after URL is plain text.
+        let after = 14 + url.len() as u16;
+        assert_eq!(buf[(after, 0)].symbol(), ")");
+    }
+
+    #[rstest]
+    fn renders_wrapped_markdown_link_with_shared_osc8_id(_with_tracing: DefaultGuard) {
+        let url = "https://example.com/very/long/path";
+        let md = format!("[Link]({url})");
+        let doc = parse(&md, None, 20);
+        let wrapped = doc.wrap(20);
+        assert!(wrapped.line_count() >= 3);
+
+        let area = Rect::new(0, 0, 20, 4);
+        let mut buf = Buffer::empty(area);
+        wrapped.render(area, &mut buf);
+
+        let url_part = format!(";{url}\x1b\\");
+        // Line 0 has "Link", line 1 has "(https://example.com" (URL starts at x = 1),
+        // line 2 has "/very/long/path)" (starts at x = 0). All three share one OSC 8 id.
+        let id_row0 = buf[(0, 0)]
+            .symbol()
+            .strip_prefix("\x1b]8;id=")
+            .and_then(|s| s.split(';').next())
+            .expect("link title line should have OSC 8 id");
+        let id_row1 = buf[(1, 1)]
+            .symbol()
+            .strip_prefix("\x1b]8;id=")
+            .and_then(|s| s.split(';').next())
+            .expect("first wrapped URL line should have OSC 8 id");
+        let id_row2 = buf[(0, 2)]
+            .symbol()
+            .strip_prefix("\x1b]8;id=")
+            .and_then(|s| s.split(';').next())
+            .expect("second wrapped URL line should have OSC 8 id");
+
+        assert!(buf[(0, 0)].symbol().contains(&url_part));
+        assert!(buf[(1, 1)].symbol().contains(&url_part));
+        assert!(buf[(0, 2)].symbol().contains(&url_part));
+        assert_eq!(id_row0, id_row1);
+        assert_eq!(id_row1, id_row2);
+    }
+
+    #[rstest]
+    fn renders_markdown_image_url_as_osc8(_with_tracing: DefaultGuard) {
+        let img_url = "https://example.com/pic.png";
+        let md = format!("![Alt]({img_url})");
+        let doc = parse(&md, None, 80);
+        let wrapped = doc.wrap(80);
+        let area = Rect::new(0, 0, 80, 3);
+        let mut buf = Buffer::empty(area);
+        wrapped.render(area, &mut buf);
+
+        let expected = format!(";{img_url}\x1b\\");
+        let linked_cells = buf
+            .content()
+            .iter()
+            .filter(|c| c.symbol().starts_with("\x1b]8;id=") && c.symbol().contains(&expected))
+            .count();
+        assert_eq!(linked_cells, img_url.len());
     }
 }

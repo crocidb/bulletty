@@ -136,9 +136,7 @@ pub fn link(theme: Option<&Theme>) -> Style {
         0xffffff
     };
 
-    Style::new()
-        .fg(Color::from_u32(link_color))
-        .add_modifier(Modifier::UNDERLINED)
+    Style::new().fg(Color::from_u32(link_color))
 }
 
 pub fn heading_meta(theme: Option<&Theme>) -> Style {
