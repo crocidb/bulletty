@@ -24,6 +24,7 @@ use crate::core::{
 use crate::ui::screens::themedialog::ThemeDialog;
 use crate::ui::screens::urldialog::UrlDialog;
 use crate::ui::tools::tuimarkdown;
+use crate::ui::widgets::hyperlink::Hyperlink;
 
 use super::helpdialog::HelpDialog;
 
@@ -200,14 +201,14 @@ impl AppScreen for ReaderScreen {
         frame.render_widget(date, contentlayout[1]);
 
         // URL
-        let date = Paragraph::new(current_entry.url.to_string())
+        let url = Hyperlink::new(current_entry.url.as_str(), current_entry.url.as_str())
             .style(
                 Style::new().fg(Color::from_u32(theme.base[0xd])), // .add_modifier(Modifier::UNDERLINED),
             )
             .alignment(Alignment::Center)
             .wrap(Wrap { trim: true });
 
-        frame.render_widget(date, contentlayout[2]);
+        frame.render_widget(url, contentlayout[2]);
 
         // Content
         let text = tuimarkdown::from_str(
@@ -215,7 +216,8 @@ impl AppScreen for ReaderScreen {
             Some(theme.clone()),
             contentlayout[3].width,
         );
-        let textheight = text.height() as usize;
+
+        let textheight = text.height();
 
         // This is a workaround to get more or less the amount of wrapped lines, to be used on the
         // scrollbar
@@ -421,5 +423,48 @@ mod tests {
         // Should not go before the first entry
         reader_screen.previous_entry();
         assert_eq!(reader_screen.current_index, 0);
+    }
+
+    #[test]
+    fn test_render_url_as_osc8_hyperlink() {
+        use ratatui::{Terminal, backend::TestBackend};
+
+        let (library, _temp_dir) = FeedLibrary::new_for_test();
+        let url = "https://example.com/article";
+        let entries = vec![FeedEntry {
+            title: "Test Entry".to_string(),
+            url: url.to_string(),
+            text: "Hello world".to_string(),
+            ..Default::default()
+        }];
+        let mut reader_screen = ReaderScreen::new(
+            Rc::new(RefCell::new(library)),
+            entries,
+            0,
+            Rc::new(AppHooks::default()),
+        );
+
+        let backend = TestBackend::new(100, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                reader_screen.render(frame, area);
+            })
+            .unwrap();
+
+        let buf = terminal.backend().buffer();
+        let expected_osc = format!(";{url}\x1b\\");
+        let linked_cells: usize = buf
+            .content()
+            .iter()
+            .filter(|cell| {
+                cell.symbol().starts_with("\x1b]8;id=")
+                    && cell.symbol().contains(&expected_osc)
+                    && cell.symbol().ends_with("\x1b]8;;\x1b\\")
+            })
+            .count();
+
+        assert_eq!(linked_cells, url.len());
     }
 }
