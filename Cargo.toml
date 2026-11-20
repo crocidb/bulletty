@@ -42,7 +42,7 @@ pulldown-cmark = "0.13.3"
 rstest = "0.26.1"
 syntect = { version = "5.3.0" }
 url = "2.5.8"
-html-escape = "0.2.13"
+html-escape = "0.3.1"
 astral-tl = "0.7.11"
 
 [target.'cfg(unix)'.dependencies]
