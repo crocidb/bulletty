@@ -27,6 +27,7 @@ pub fn run() -> color_eyre::Result<()> {
         hooks: None,
         tui_auto_update: Some(true),
         parallel_feed_updates: Some(true),
+        hide_unread_count: Some(false),
     })?;
 
     let cli = cli::Cli::parse();
